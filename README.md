@@ -34,6 +34,10 @@ A cross‑platform desktop GUI application (Tkinter) for managing test forms, pr
 Install all dependencies with:
 
 ```bash
+pip install -r requirements.txt
+```
+or
+```bash
 pip install pypdf pdf2image Pillow google-cloud-firestore
 ```
 
