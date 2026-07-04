@@ -678,11 +678,16 @@ class TestManagerApp:
         dialog.transient(self.root)
         dialog.grab_set()
 
-        # Load template folders from templates_dir
+        # Load template folders from templates_dir (find folders containing template.json)
         templates_dir = self.settings.get("templates_dir")
         template_options = []
         if os.path.exists(templates_dir):
-            template_options = [d for d in os.listdir(templates_dir) if os.path.isdir(os.path.join(templates_dir, d))]
+            for root, dirs, files in os.walk(templates_dir):
+                if "template.json" in files:
+                    rel_path = os.path.relpath(root, templates_dir)
+                    if rel_path != ".":
+                        template_options.append(rel_path)
+            template_options.sort()
         else:
             messagebox.showwarning("Templates folder not set", "Please set the templates folder in Settings.")
 
