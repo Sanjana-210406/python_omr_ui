@@ -18,7 +18,7 @@ def build():
 
     # PyInstaller packaging arguments
     pyinstaller_args = [
-        "pyinstaller",
+        sys.executable, "-m", "PyInstaller",
         "--windowed",                 # Hides terminal/console window
         "--name=OMRTestManager",       # Output application name
         f"--add-data=samples{sep}samples",     # Bundle OMR template files
