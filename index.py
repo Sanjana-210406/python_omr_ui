@@ -93,6 +93,7 @@ class SettingsManager:
         }
         self.data = self._load()
         self._deploy_bundled_samples()
+        self.current_test_id = None
 
     def _deploy_bundled_samples(self):
         if getattr(sys, 'frozen', False):
@@ -129,24 +130,30 @@ class SettingsManager:
         with open(self.config_file, 'w') as f:
             json.dump(self.data, f, indent=4)
 
-    def get(self, key, default=None):
+    def get(self, key, default=None, raw=False):
         if key in ["input_dir", "output_dir", "python_command", "templates_dir"]:
             platform_key = f"{key}_{sys.platform}"
+            val = None
             if platform_key in self.data:
-                return self.data[platform_key]
-            if sys.platform == "win32" and key in self.data:
-                return self.data[key]
-            if getattr(sys, 'frozen', False):
-                base_dir = os.path.expanduser("~/OMR_Test_Manager")
+                val = self.data[platform_key]
+            elif sys.platform == "win32" and key in self.data:
+                val = self.data[key]
             else:
-                base_dir = os.path.dirname(os.path.abspath(__file__))
-            defaults_map = {
-                "input_dir": os.path.join(base_dir, "inputs"),
-                "output_dir": os.path.join(base_dir, "outputs"),
-                "templates_dir": os.path.join(base_dir, "samples"),
-                "python_command": "python3 main.py --inputDir {input} --outputDir {output}"
-            }
-            return defaults_map.get(key, default)
+                if getattr(sys, 'frozen', False):
+                    base_dir = os.path.expanduser("~/OMR_Test_Manager")
+                else:
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                defaults_map = {
+                    "input_dir": os.path.join(base_dir, "inputs"),
+                    "output_dir": os.path.join(base_dir, "outputs"),
+                    "templates_dir": os.path.join(base_dir, "samples"),
+                    "python_command": "python3 main.py --inputDir {input} --outputDir {output}"
+                }
+                val = defaults_map.get(key, default)
+            
+            if not raw and key in ["input_dir", "output_dir"] and getattr(self, "current_test_id", None) is not None:
+                val = os.path.join(val, str(self.current_test_id))
+            return val
         return self.data.get(key, default)
 
     def set(self, key, value):
@@ -612,6 +619,7 @@ class TestManagerApp:
             values = item['values']
             if values:
                 self.current_test_id = values[0]
+                self.settings.current_test_id = values[0]
                 self.current_test_data = {
                     "id": values[0],
                     "name": values[1],
@@ -628,6 +636,7 @@ class TestManagerApp:
                 self.display_latest_csv()
         else:
             self.current_test_id = None
+            self.settings.current_test_id = None
             self.current_test_data = None
             self.test_info_label.config(text="Select a test")
             self.btn_input_pdf.config(state=DISABLED)
@@ -910,11 +919,11 @@ class TestManagerApp:
         settings_win.grab_set()
 
         # Variables
-        input_dir_var = StringVar(value=self.settings.get("input_dir"))
-        output_dir_var = StringVar(value=self.settings.get("output_dir"))
-        python_cmd_var = StringVar(value=self.settings.get("python_command"))
-        templates_dir_var = StringVar(value=self.settings.get("templates_dir"))
-        firestore_key_var = StringVar(value=self.settings.get("firestore_auth_key"))
+        input_dir_var = StringVar(value=self.settings.get("input_dir", raw=True))
+        output_dir_var = StringVar(value=self.settings.get("output_dir", raw=True))
+        python_cmd_var = StringVar(value=self.settings.get("python_command", raw=True))
+        templates_dir_var = StringVar(value=self.settings.get("templates_dir", raw=True))
+        firestore_key_var = StringVar(value=self.settings.get("firestore_auth_key", raw=True))
         collection_var = StringVar(value=self.settings.get("firestore_collection", "test_results"))
 
         def browse_dir(var):
