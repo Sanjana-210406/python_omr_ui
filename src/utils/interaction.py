@@ -22,9 +22,12 @@ class InteractionUtils:
     """Perform primary functions such as displaying images and reading responses"""
 
     image_metrics = ImageMetrics()
+    disable_gui = False
 
     @staticmethod
     def show(name, origin, pause=1, resize=False, reset_pos=None, config=None):
+        if getattr(InteractionUtils, "disable_gui", False):
+            return
         image_metrics = InteractionUtils.image_metrics
         if origin is None:
             logger.info(f"'{name}' - NoneType image to show!")

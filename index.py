@@ -345,6 +345,8 @@ class PDFProcessor:
                 try:
                     from src.entry import entry_point
                     from pathlib import Path
+                    from src.utils.interaction import InteractionUtils
+                    InteractionUtils.disable_gui = True
                     
                     args = {
                         "input_paths": [input_dir],
