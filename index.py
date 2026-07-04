@@ -196,19 +196,25 @@ class PDFProcessor:
     # -------------------------------------------------------
     def process_pdf(self, pdf_path, template_folder, progress_callback=None):
 
-        input_dir = self.settings.get("input_dir")
-        output_dir = self.settings.get("output_dir")
+        base_input_dir = self.settings.get("input_dir", raw=True)
+        base_output_dir = self.settings.get("output_dir", raw=True)
         templates_dir = self.settings.get("templates_dir")
 
-        # Validate folders
-        if not os.path.exists(input_dir):
-            raise Exception("Input directory does not exist.")
+        # Validate base folders
+        if not os.path.exists(base_input_dir):
+            raise Exception("Base input directory does not exist. Check settings.")
 
-        if not os.path.exists(output_dir):
-            raise Exception("Output directory does not exist.")
+        if not os.path.exists(base_output_dir):
+            raise Exception("Base output directory does not exist. Check settings.")
 
         if not os.path.exists(templates_dir):
             raise Exception("Templates directory does not exist.")
+
+        # Resolve actual folders and create them
+        input_dir = self.settings.get("input_dir")
+        output_dir = self.settings.get("output_dir")
+        os.makedirs(input_dir, exist_ok=True)
+        os.makedirs(output_dir, exist_ok=True)
 
         template_source = os.path.join(
             templates_dir,
