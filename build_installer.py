@@ -8,23 +8,33 @@ def build():
     for folder in ["build", "dist"]:
         if os.path.exists(folder):
             print(f"Removing {folder}...")
-            shutil.rmtree(folder)
+            try:
+                shutil.rmtree(folder)
+            except Exception as e:
+                print(f"Warning: Could not remove {folder}: {e}")
+
+    # Semicolon (;) is used as path separator on Windows, colon (:) on Mac/Linux
+    sep = ";" if sys.platform == "win32" else ":"
 
     # PyInstaller packaging arguments
     pyinstaller_args = [
         "pyinstaller",
-        "--windowed",              # macOS app bundle, hides console
-        "--name=OMRTestManager",    # Output application name
-        "--add-data=samples:samples", # Bundle OMR template files
-        "--add-data=app_config.json:.", # Bundle default config
-        "--add-data=tests.db:.",      # Bundle default database
+        "--windowed",                 # Hides terminal/console window
+        "--name=OMRTestManager",       # Output application name
+        f"--add-data=samples{sep}samples",     # Bundle OMR template files
+        f"--add-data=app_config.json{sep}.",   # Bundle default config
+        f"--add-data=tests.db{sep}.",         # Bundle default database
         "index.py"
     ]
+
+    # For Windows, bundle into a single standalone executable file (.exe)
+    if sys.platform == "win32":
+        pyinstaller_args.append("--onefile")
 
     print("\n=== Step 2: Running PyInstaller ===")
     print("Running command:", " ".join(pyinstaller_args))
     
-    result = subprocess.run(pyinstaller_args, capture_output=False)
+    result = subprocess.run(pyinstaller_args, shell=True if sys.platform == "win32" else False)
     if result.returncode != 0:
         print("Error: PyInstaller build failed!")
         sys.exit(result.returncode)
@@ -59,6 +69,13 @@ def build():
                 print("Error: DMG packaging failed!")
         else:
             print("Error: OMRTestManager.app bundle not found in dist/!")
+            
+    elif sys.platform == "win32":
+        exe_path = "dist/OMRTestManager.exe"
+        if os.path.exists(exe_path):
+            print(f"\nSuccess! Standalone Windows executable created at: {os.path.abspath(exe_path)}")
+        else:
+            print("Error: OMRTestManager.exe not found in dist/!")
 
 if __name__ == "__main__":
     build()
