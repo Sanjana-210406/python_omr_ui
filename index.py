@@ -11,18 +11,20 @@ import time
 from datetime import datetime
 from tkinter import *
 from tkinter import ttk, filedialog, messagebox, scrolledtext
-from pdf2image import convert_from_path, pdfinfo_from_path
-try:
-    from pypdf import PdfReader
-except ImportError:
-    from PyPDF2 import PdfReader
 from google.cloud import firestore
 from google.oauth2 import service_account
+import fitz
 
 
 # ========================== CONFIGURATION ==========================
-CONFIG_FILE = "app_config.json"
-DB_FILE = "tests.db"
+if getattr(sys, 'frozen', False):
+    DATA_DIR = os.path.expanduser("~/.omr_test_manager")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    CONFIG_FILE = os.path.join(DATA_DIR, "app_config.json")
+    DB_FILE = os.path.join(DATA_DIR, "tests.db")
+else:
+    CONFIG_FILE = "app_config.json"
+    DB_FILE = "tests.db"
 PIN_SALT = "some_salt"  # Keep fixed for hashing
 
 
@@ -90,6 +92,26 @@ class SettingsManager:
             "pin_hash": self._hash_pin("123456")  # default PIN: 123456
         }
         self.data = self._load()
+        self._deploy_bundled_samples()
+        self.current_test_id = None
+
+    def _deploy_bundled_samples(self):
+        if getattr(sys, 'frozen', False):
+            user_samples_dir = os.path.expanduser("~/OMR_Test_Manager/samples")
+            if not os.path.exists(user_samples_dir) or not os.listdir(user_samples_dir):
+                os.makedirs(user_samples_dir, exist_ok=True)
+                bundled_samples = os.path.join(sys._MEIPASS, "samples")
+                if os.path.exists(bundled_samples):
+                    for item in os.listdir(bundled_samples):
+                        src_item = os.path.join(bundled_samples, item)
+                        dst_item = os.path.join(user_samples_dir, item)
+                        try:
+                            if os.path.isdir(src_item):
+                                shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+                            else:
+                                shutil.copy2(src_item, dst_item)
+                        except Exception as e:
+                            print(f"Failed to copy template {item}: {e}")
 
     def _hash_pin(self, pin):
         return hashlib.sha256((pin + PIN_SALT).encode()).hexdigest()
@@ -108,21 +130,38 @@ class SettingsManager:
         with open(self.config_file, 'w') as f:
             json.dump(self.data, f, indent=4)
 
-    def get(self, key, default=None):
+    def get(self, key, default=None, raw=False):
         if key in ["input_dir", "output_dir", "python_command", "templates_dir"]:
             platform_key = f"{key}_{sys.platform}"
+            val = None
             if platform_key in self.data:
-                return self.data[platform_key]
-            if sys.platform == "win32" and key in self.data:
-                return self.data[key]
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            defaults_map = {
-                "input_dir": os.path.join(base_dir, "inputs"),
-                "output_dir": os.path.join(base_dir, "outputs"),
-                "templates_dir": os.path.join(base_dir, "samples"),
-                "python_command": "python3 main.py --inputDir {input} --outputDir {output}"
-            }
-            return defaults_map.get(key, default)
+                val = self.data[platform_key]
+            elif sys.platform == "win32" and key in self.data:
+                val = self.data[key]
+            else:
+                if getattr(sys, 'frozen', False):
+                    base_dir = os.path.expanduser("~/OMR_Test_Manager")
+                else:
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                defaults_map = {
+                    "input_dir": os.path.join(base_dir, "inputs"),
+                    "output_dir": os.path.join(base_dir, "outputs"),
+                    "templates_dir": os.path.join(base_dir, "samples"),
+                    "python_command": "python3 main.py --inputDir {input} --outputDir {output}"
+                }
+                val = defaults_map.get(key, default)
+            
+            # Make relative directory paths absolute relative to base_dir
+            if key in ["input_dir", "output_dir", "templates_dir"] and val and not os.path.isabs(val):
+                if getattr(sys, 'frozen', False):
+                    base_dir = os.path.expanduser("~/OMR_Test_Manager")
+                else:
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                val = os.path.abspath(os.path.join(base_dir, val))
+                
+            if not raw and key in ["input_dir", "output_dir"] and getattr(self, "current_test_id", None) is not None:
+                val = os.path.join(val, str(self.current_test_id))
+            return val
         return self.data.get(key, default)
 
     def set(self, key, value):
@@ -149,50 +188,41 @@ class PDFProcessor:
     def __init__(self, settings):
         self.settings = settings
 
-        # Change this path if your Poppler is installed elsewhere.
-        self.poppler_path = r"C:\Users\HP\Downloads\Release-26.02.0-0\poppler-26.02.0\Library\bin"
-        if not os.path.exists(self.poppler_path):
-            self.poppler_path = None
-
     # -------------------------------------------------------
     # Get PDF Page Count
     # -------------------------------------------------------
     def get_page_count(self, pdf_path):
         try:
-            # Method 1 - PyPDF2
-            reader = PdfReader(pdf_path)
-            return len(reader.pages)
-
-        except Exception:
-            try:
-                # Method 2 - pdf2image
-                info = pdfinfo_from_path(
-                    pdf_path,
-                    poppler_path=self.poppler_path
-                )
-                return info["Pages"]
-
-            except Exception as e:
-                raise Exception(f"Unable to read PDF.\n\n{e}")
+            import fitz
+            doc = fitz.open(pdf_path)
+            return len(doc)
+        except Exception as e:
+            raise Exception(f"Unable to read PDF.\n\n{e}")
 
     # -------------------------------------------------------
     # Convert PDF to Images
     # -------------------------------------------------------
     def process_pdf(self, pdf_path, template_folder, progress_callback=None):
 
-        input_dir = self.settings.get("input_dir")
-        output_dir = self.settings.get("output_dir")
+        base_input_dir = self.settings.get("input_dir", raw=True)
+        base_output_dir = self.settings.get("output_dir", raw=True)
         templates_dir = self.settings.get("templates_dir")
 
-        # Validate folders
-        if not os.path.exists(input_dir):
-            raise Exception("Input directory does not exist.")
+        # Validate base folders
+        if not os.path.exists(base_input_dir):
+            raise Exception("Base input directory does not exist. Check settings.")
 
-        if not os.path.exists(output_dir):
-            raise Exception("Output directory does not exist.")
+        if not os.path.exists(base_output_dir):
+            raise Exception("Base output directory does not exist. Check settings.")
 
         if not os.path.exists(templates_dir):
             raise Exception("Templates directory does not exist.")
+
+        # Resolve actual folders and create them
+        input_dir = self.settings.get("input_dir")
+        output_dir = self.settings.get("output_dir")
+        os.makedirs(input_dir, exist_ok=True)
+        os.makedirs(output_dir, exist_ok=True)
 
         template_source = os.path.join(
             templates_dir,
@@ -206,7 +236,7 @@ class PDFProcessor:
 
         # ---------------------------------------------------
         # Clear Input & Output folders
-                # ---------------------------------------------------
+        # ---------------------------------------------------
         for folder in [input_dir, output_dir]:
 
             for item in os.listdir(folder):
@@ -237,21 +267,21 @@ class PDFProcessor:
         if progress_callback:
             progress_callback("Converting PDF to Images...")
 
-        images = convert_from_path(
-            pdf_path,
-            dpi=300,
-            poppler_path=self.poppler_path
-        )
+        try:
+            import fitz
+            doc = fitz.open(pdf_path)
+            zoom = 300 / 72
+            matrix = fitz.Matrix(zoom, zoom)
+            page_count = len(doc)
 
-        for i, image in enumerate(images, start=1):
+            for i, page in enumerate(doc, start=1):
+                pix = page.get_pixmap(matrix=matrix)
+                pix.save(os.path.join(input_dir, f"page_{i}.jpg"))
 
-            image.save(
-                os.path.join(input_dir, f"page_{i}.jpg"),
-                "JPEG"
-            )
-
-        if progress_callback:
-            progress_callback(f"{len(images)} pages converted.")
+            if progress_callback:
+                progress_callback(f"{page_count} pages converted.")
+        except Exception as e:
+            raise Exception(f"Failed to convert PDF pages: {e}")
 
         # ---------------------------------------------------
         # Copy Template Files
@@ -273,7 +303,7 @@ class PDFProcessor:
         if progress_callback:
             progress_callback("Template copied successfully.")
 
-        return len(images)
+        return page_count
 
     # -------------------------------------------------------
     # Run OMR Command
@@ -285,45 +315,102 @@ class PDFProcessor:
         input_dir = self.settings.get("input_dir")
         output_dir = self.settings.get("output_dir")
 
-        cmd = (
-            cmd_template
-            .replace("{input}", input_dir)
-            .replace("{output}", output_dir)
-        )
+        # Determine if we should use the built-in OMRChecker or fallback to shell command
+        is_default_cmd = "OMRChecker" in cmd_template or getattr(sys, 'frozen', False)
 
-        if progress_callback:
-            progress_callback(f"Running:\n{cmd}")
+        if is_default_cmd:
+            if progress_callback:
+                progress_callback("Initializing built-in OMR Engine...")
+            try:
+                import logging
+                
+                # Create a custom log handler to stream logs to GUI callback
+                class GUIProgressLogHandler(logging.Handler):
+                    def __init__(self, callback):
+                        super().__init__()
+                        self.callback = callback
+                    def emit(self, record):
+                        try:
+                            msg = self.format(record)
+                            self.callback(msg)
+                        except Exception:
+                            pass
 
-        try:
+                # Add our handler to the root logger
+                handler = GUIProgressLogHandler(progress_callback)
+                handler.setFormatter(logging.Formatter('%(message)s'))
+                root_logger = logging.getLogger()
+                root_logger.addHandler(handler)
 
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=300
+                try:
+                    from src.entry import entry_point
+                    from pathlib import Path
+                    from src.utils.interaction import InteractionUtils
+                    InteractionUtils.disable_gui = True
+                    
+                    args = {
+                        "input_paths": [input_dir],
+                        "output_dir": output_dir,
+                        "debug": False,
+                        "autoAlign": False,
+                        "setLayout": False
+                    }
+                    
+                    for root_path in args["input_paths"]:
+                        entry_point(Path(root_path), args)
+                        
+                    if progress_callback:
+                        progress_callback("OMR completed successfully.")
+                        
+                finally:
+                    # Clean up handler
+                    root_logger.removeHandler(handler)
+
+            except Exception as e:
+                import traceback
+                print(traceback.format_exc())
+                raise Exception(f"OMR Engine error: {e}")
+        else:
+            # Fallback to subprocess execution (original logic)
+            cmd = (
+                cmd_template
+                .replace("{input}", input_dir)
+                .replace("{output}", output_dir)
             )
-            time.sleep(2)
-             # Show command output
-            print("========== STDOUT ==========")
-            print(result.stdout)
-
-            print("========== STDERR ==========")
-            print(result.stderr)
 
             if progress_callback:
-                progress_callback(result.stdout + "\n" + result.stderr)
+                progress_callback(f"Running:\n{cmd}")
 
-            if result.returncode != 0:
-                raise Exception(result.stderr)
+            try:
 
-            if progress_callback:
-                progress_callback("OMR completed successfully.")
+                result = subprocess.run(
+                    cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                time.sleep(2)
+                 # Show command output
+                print("========== STDOUT ==========")
+                print(result.stdout)
 
-            return result.stdout
+                print("========== STDERR ==========")
+                print(result.stderr)
 
-        except subprocess.TimeoutExpired:
-            raise Exception("OMR process timed out.")
+                if progress_callback:
+                    progress_callback(result.stdout + "\n" + result.stderr)
+
+                if result.returncode != 0:
+                    raise Exception(result.stderr)
+
+                if progress_callback:
+                    progress_callback("OMR completed successfully.")
+
+                return result.stdout
+
+            except subprocess.TimeoutExpired:
+                raise Exception("OMR process timed out.")
 
     # -------------------------------------------------------
     # CSV Files
@@ -548,6 +635,7 @@ class TestManagerApp:
             values = item['values']
             if values:
                 self.current_test_id = values[0]
+                self.settings.current_test_id = values[0]
                 self.current_test_data = {
                     "id": values[0],
                     "name": values[1],
@@ -564,6 +652,7 @@ class TestManagerApp:
                 self.display_latest_csv()
         else:
             self.current_test_id = None
+            self.settings.current_test_id = None
             self.current_test_data = None
             self.test_info_label.config(text="Select a test")
             self.btn_input_pdf.config(state=DISABLED)
@@ -589,11 +678,16 @@ class TestManagerApp:
         dialog.transient(self.root)
         dialog.grab_set()
 
-        # Load template folders from templates_dir
+        # Load template folders from templates_dir (find folders containing template.json)
         templates_dir = self.settings.get("templates_dir")
         template_options = []
         if os.path.exists(templates_dir):
-            template_options = [d for d in os.listdir(templates_dir) if os.path.isdir(os.path.join(templates_dir, d))]
+            for root, dirs, files in os.walk(templates_dir):
+                if "template.json" in files:
+                    rel_path = os.path.relpath(root, templates_dir)
+                    if rel_path != ".":
+                        template_options.append(rel_path)
+            template_options.sort()
         else:
             messagebox.showwarning("Templates folder not set", "Please set the templates folder in Settings.")
 
@@ -714,8 +808,45 @@ class TestManagerApp:
     def run_command(self):
         if not self.current_test_data:
             return
+
+        # Check if PDF was loaded first
+        input_dir = self.settings.get("input_dir")
+        if not os.path.exists(input_dir) or not os.listdir(input_dir):
+            # No PDF loaded. Check if the template folder contains sample images!
+            template_folder = self.current_test_data["template"]
+            templates_dir = self.settings.get("templates_dir")
+            template_path = os.path.join(templates_dir, template_folder)
+            
+            sample_images = []
+            if os.path.exists(template_path):
+                for root, dirs, files in os.walk(template_path):
+                    for f in files:
+                        if f.lower().endswith(('.png', '.jpg', '.jpeg')):
+                            if f.lower() != "omr_marker.jpg":
+                                sample_images.append(os.path.join(root, f))
+            
+            if sample_images:
+                self.status_var.set("Copying built-in sample images...")
+                os.makedirs(input_dir, exist_ok=True)
+                
+                # Copy all files (template.json, evaluation.json, answer_key.csv, etc.) from template root
+                if os.path.exists(template_path):
+                    for item in os.listdir(template_path):
+                        src_item = os.path.join(template_path, item)
+                        dst_item = os.path.join(input_dir, item)
+                        if os.path.isfile(src_item):
+                            shutil.copy2(src_item, dst_item)
+                    
+                # Copy images
+                for idx, img_path in enumerate(sample_images, start=1):
+                    ext = os.path.splitext(img_path)[1]
+                    shutil.copy2(img_path, os.path.join(input_dir, f"page_{idx}{ext}"))
+            else:
+                messagebox.showwarning("Warning", "Please load your scanned PDF sheets first by clicking the 'Input PDF' button!")
+                return
+
         # Confirm
-        if not messagebox.askyesno("Run Command", "Run the configured command now?"):
+        if not messagebox.askyesno("Run Command", "Run the configured OMR command now?"):
             return
 
         self.status_var.set("Running command...")
@@ -846,11 +977,11 @@ class TestManagerApp:
         settings_win.grab_set()
 
         # Variables
-        input_dir_var = StringVar(value=self.settings.get("input_dir"))
-        output_dir_var = StringVar(value=self.settings.get("output_dir"))
-        python_cmd_var = StringVar(value=self.settings.get("python_command"))
-        templates_dir_var = StringVar(value=self.settings.get("templates_dir"))
-        firestore_key_var = StringVar(value=self.settings.get("firestore_auth_key"))
+        input_dir_var = StringVar(value=self.settings.get("input_dir", raw=True))
+        output_dir_var = StringVar(value=self.settings.get("output_dir", raw=True))
+        python_cmd_var = StringVar(value=self.settings.get("python_command", raw=True))
+        templates_dir_var = StringVar(value=self.settings.get("templates_dir", raw=True))
+        firestore_key_var = StringVar(value=self.settings.get("firestore_auth_key", raw=True))
         collection_var = StringVar(value=self.settings.get("firestore_collection", "test_results"))
 
         def browse_dir(var):

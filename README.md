@@ -39,6 +39,24 @@ The login screen is protected by a 6-digit PIN.
 * The hash is computed using SHA-256 and stored as `pin_hash` inside `app_config.json`.
 * Default PIN is `123456`. You can update it using the GUI's **Settings → Change PIN** option.
 
+## 5. Building Standalone Installers
+You can package this application into a standalone executable that runs without requiring Python or other libraries installed on the target machine.
+
+* **macOS Installer (`.dmg`)**:
+  Run the build script on a Mac computer:
+  ```bash
+  python3 build_installer.py
+  ```
+  This creates `dist/OMRTestManager.app` and packages it into `dist/OMRTestManager.dmg`.
+* **Windows Executable (`.exe`)**:
+  Run the batch script on a Windows computer:
+  ```cmd
+  build_installer_win.bat
+  ```
+  This installs packages and compiles the app into a single executable `dist/OMRTestManager.exe`.
+* **Automated Cloud Builds (GitHub Actions)**:
+  Every push to the `main` or `mac-compatibility-and-fixes` branches triggers a GitHub Actions workflow. You can download the pre-compiled `OMRTestManager.exe` directly from the **Actions** tab of your repository.
+
 ---
 
 # PART 2: School Setup & End-User Guide (School Staff)
@@ -53,21 +71,8 @@ Welcome! This guide will help you install and run the Test Manager software on y
 ### Package Installation
 Open your terminal (macOS) or Command Prompt (Windows) and install the required modules:
 ```bash
-pip install pypdf pdf2image Pillow google-cloud-firestore opencv-python deepmerge dotmap jsonschema matplotlib numpy pandas rich screeninfo PyMuPDF
+pip install Pillow pymupdf google-cloud-firestore opencv-python deepmerge dotmap jsonschema matplotlib numpy pandas rich screeninfo
 ```
-
-### Poppler Installation (Required for PDF processing)
-The application requires a helper tool called **Poppler** to read and convert PDF test papers.
-* **macOS (Apple Mac)**:
-  1. Open Terminal.
-  2. Install Homebrew (if not already installed) and run:
-     ```bash
-     brew install poppler
-     ```
-* **Windows**:
-  1. Download Poppler binaries (e.g., from conda-forge or standard release builds).
-  2. Extract the folder to a safe place (e.g., `C:\Program Files\poppler`).
-  3. Add the `bin` directory of Poppler (e.g., `C:\Program Files\poppler\Library\bin`) to your Windows System `PATH` environment variables.
 
 ---
 
@@ -120,9 +125,6 @@ Follow these steps for every OMR test you need to grade:
 ---
 
 ## 4. Troubleshooting Guide for Staff
-
-* **Error: "Unable to read PDF. Is poppler installed?"**
-  * Make sure you installed Poppler according to the instructions in Section 1. If on Windows, ensure Poppler's `bin` folder is correctly added to your system `PATH`.
 * **Error: "Template folder '...' not found."**
   * Check that your **Templates Folder** in Preferences contains the folder name selected for this test.
 * **The CSV Preview shows old values or doesn't update.**
