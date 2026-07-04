@@ -801,6 +801,13 @@ class TestManagerApp:
     def run_command(self):
         if not self.current_test_data:
             return
+
+        # Check if PDF was loaded first
+        input_dir = self.settings.get("input_dir")
+        if not os.path.exists(input_dir) or not os.listdir(input_dir):
+            messagebox.showwarning("Warning", "Please load your scanned PDF sheets first by clicking the 'Input PDF' button!")
+            return
+
         # Confirm
         if not messagebox.askyesno("Run Command", "Run the configured command now?"):
             return
