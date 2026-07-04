@@ -349,7 +349,7 @@ class PDFProcessor:
                     args = {
                         "input_paths": [input_dir],
                         "output_dir": output_dir,
-                        "debug": True,
+                        "debug": False,
                         "autoAlign": False,
                         "setLayout": False
                     }
