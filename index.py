@@ -151,6 +151,14 @@ class SettingsManager:
                 }
                 val = defaults_map.get(key, default)
             
+            # Make relative directory paths absolute relative to base_dir
+            if key in ["input_dir", "output_dir", "templates_dir"] and val and not os.path.isabs(val):
+                if getattr(sys, 'frozen', False):
+                    base_dir = os.path.expanduser("~/OMR_Test_Manager")
+                else:
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                val = os.path.abspath(os.path.join(base_dir, val))
+                
             if not raw and key in ["input_dir", "output_dir"] and getattr(self, "current_test_id", None) is not None:
                 val = os.path.join(val, str(self.current_test_id))
             return val
