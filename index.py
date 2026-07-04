@@ -822,10 +822,13 @@ class TestManagerApp:
                 self.status_var.set("Copying built-in sample images...")
                 os.makedirs(input_dir, exist_ok=True)
                 
-                # Copy the template marker
-                marker_src = os.path.join(template_path, "omr_marker.jpg")
-                if os.path.exists(marker_src):
-                    shutil.copy2(marker_src, os.path.join(input_dir, "omr_marker.jpg"))
+                # Copy all files (template.json, evaluation.json, answer_key.csv, etc.) from template root
+                if os.path.exists(template_path):
+                    for item in os.listdir(template_path):
+                        src_item = os.path.join(template_path, item)
+                        dst_item = os.path.join(input_dir, item)
+                        if os.path.isfile(src_item):
+                            shutil.copy2(src_item, dst_item)
                     
                 # Copy images
                 for idx, img_path in enumerate(sample_images, start=1):
