@@ -805,11 +805,38 @@ class TestManagerApp:
         # Check if PDF was loaded first
         input_dir = self.settings.get("input_dir")
         if not os.path.exists(input_dir) or not os.listdir(input_dir):
-            messagebox.showwarning("Warning", "Please load your scanned PDF sheets first by clicking the 'Input PDF' button!")
-            return
+            # No PDF loaded. Check if the template folder contains sample images!
+            template_folder = self.current_test_data["template"]
+            templates_dir = self.settings.get("templates_dir")
+            template_path = os.path.join(templates_dir, template_folder)
+            
+            sample_images = []
+            if os.path.exists(template_path):
+                for root, dirs, files in os.walk(template_path):
+                    for f in files:
+                        if f.lower().endswith(('.png', '.jpg', '.jpeg')):
+                            if f.lower() != "omr_marker.jpg":
+                                sample_images.append(os.path.join(root, f))
+            
+            if sample_images:
+                self.status_var.set("Copying built-in sample images...")
+                os.makedirs(input_dir, exist_ok=True)
+                
+                # Copy the template marker
+                marker_src = os.path.join(template_path, "omr_marker.jpg")
+                if os.path.exists(marker_src):
+                    shutil.copy2(marker_src, os.path.join(input_dir, "omr_marker.jpg"))
+                    
+                # Copy images
+                for idx, img_path in enumerate(sample_images, start=1):
+                    ext = os.path.splitext(img_path)[1]
+                    shutil.copy2(img_path, os.path.join(input_dir, f"page_{idx}{ext}"))
+            else:
+                messagebox.showwarning("Warning", "Please load your scanned PDF sheets first by clicking the 'Input PDF' button!")
+                return
 
         # Confirm
-        if not messagebox.askyesno("Run Command", "Run the configured command now?"):
+        if not messagebox.askyesno("Run Command", "Run the configured OMR command now?"):
             return
 
         self.status_var.set("Running command...")
