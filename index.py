@@ -11,18 +11,20 @@ import time
 from datetime import datetime
 from tkinter import *
 from tkinter import ttk, filedialog, messagebox, scrolledtext
-from pdf2image import convert_from_path, pdfinfo_from_path
-try:
-    from pypdf import PdfReader
-except ImportError:
-    from PyPDF2 import PdfReader
 from google.cloud import firestore
 from google.oauth2 import service_account
+import fitz
 
 
 # ========================== CONFIGURATION ==========================
-CONFIG_FILE = "app_config.json"
-DB_FILE = "tests.db"
+if getattr(sys, 'frozen', False):
+    DATA_DIR = os.path.expanduser("~/.omr_test_manager")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    CONFIG_FILE = os.path.join(DATA_DIR, "app_config.json")
+    DB_FILE = os.path.join(DATA_DIR, "tests.db")
+else:
+    CONFIG_FILE = "app_config.json"
+    DB_FILE = "tests.db"
 PIN_SALT = "some_salt"  # Keep fixed for hashing
 
 
@@ -90,6 +92,25 @@ class SettingsManager:
             "pin_hash": self._hash_pin("123456")  # default PIN: 123456
         }
         self.data = self._load()
+        self._deploy_bundled_samples()
+
+    def _deploy_bundled_samples(self):
+        if getattr(sys, 'frozen', False):
+            user_samples_dir = os.path.expanduser("~/OMR_Test_Manager/samples")
+            if not os.path.exists(user_samples_dir) or not os.listdir(user_samples_dir):
+                os.makedirs(user_samples_dir, exist_ok=True)
+                bundled_samples = os.path.join(sys._MEIPASS, "samples")
+                if os.path.exists(bundled_samples):
+                    for item in os.listdir(bundled_samples):
+                        src_item = os.path.join(bundled_samples, item)
+                        dst_item = os.path.join(user_samples_dir, item)
+                        try:
+                            if os.path.isdir(src_item):
+                                shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+                            else:
+                                shutil.copy2(src_item, dst_item)
+                        except Exception as e:
+                            print(f"Failed to copy template {item}: {e}")
 
     def _hash_pin(self, pin):
         return hashlib.sha256((pin + PIN_SALT).encode()).hexdigest()
@@ -115,7 +136,10 @@ class SettingsManager:
                 return self.data[platform_key]
             if sys.platform == "win32" and key in self.data:
                 return self.data[key]
-            base_dir = os.path.dirname(os.path.abspath(__file__))
+            if getattr(sys, 'frozen', False):
+                base_dir = os.path.expanduser("~/OMR_Test_Manager")
+            else:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
             defaults_map = {
                 "input_dir": os.path.join(base_dir, "inputs"),
                 "output_dir": os.path.join(base_dir, "outputs"),
@@ -149,31 +173,16 @@ class PDFProcessor:
     def __init__(self, settings):
         self.settings = settings
 
-        # Change this path if your Poppler is installed elsewhere.
-        self.poppler_path = r"C:\Users\HP\Downloads\Release-26.02.0-0\poppler-26.02.0\Library\bin"
-        if not os.path.exists(self.poppler_path):
-            self.poppler_path = None
-
     # -------------------------------------------------------
     # Get PDF Page Count
     # -------------------------------------------------------
     def get_page_count(self, pdf_path):
         try:
-            # Method 1 - PyPDF2
-            reader = PdfReader(pdf_path)
-            return len(reader.pages)
-
-        except Exception:
-            try:
-                # Method 2 - pdf2image
-                info = pdfinfo_from_path(
-                    pdf_path,
-                    poppler_path=self.poppler_path
-                )
-                return info["Pages"]
-
-            except Exception as e:
-                raise Exception(f"Unable to read PDF.\n\n{e}")
+            import fitz
+            doc = fitz.open(pdf_path)
+            return len(doc)
+        except Exception as e:
+            raise Exception(f"Unable to read PDF.\n\n{e}")
 
     # -------------------------------------------------------
     # Convert PDF to Images
@@ -206,7 +215,7 @@ class PDFProcessor:
 
         # ---------------------------------------------------
         # Clear Input & Output folders
-                # ---------------------------------------------------
+        # ---------------------------------------------------
         for folder in [input_dir, output_dir]:
 
             for item in os.listdir(folder):
@@ -237,21 +246,21 @@ class PDFProcessor:
         if progress_callback:
             progress_callback("Converting PDF to Images...")
 
-        images = convert_from_path(
-            pdf_path,
-            dpi=300,
-            poppler_path=self.poppler_path
-        )
+        try:
+            import fitz
+            doc = fitz.open(pdf_path)
+            zoom = 300 / 72
+            matrix = fitz.Matrix(zoom, zoom)
+            page_count = len(doc)
 
-        for i, image in enumerate(images, start=1):
+            for i, page in enumerate(doc, start=1):
+                pix = page.get_pixmap(matrix=matrix)
+                pix.save(os.path.join(input_dir, f"page_{i}.jpg"))
 
-            image.save(
-                os.path.join(input_dir, f"page_{i}.jpg"),
-                "JPEG"
-            )
-
-        if progress_callback:
-            progress_callback(f"{len(images)} pages converted.")
+            if progress_callback:
+                progress_callback(f"{page_count} pages converted.")
+        except Exception as e:
+            raise Exception(f"Failed to convert PDF pages: {e}")
 
         # ---------------------------------------------------
         # Copy Template Files
@@ -285,45 +294,100 @@ class PDFProcessor:
         input_dir = self.settings.get("input_dir")
         output_dir = self.settings.get("output_dir")
 
-        cmd = (
-            cmd_template
-            .replace("{input}", input_dir)
-            .replace("{output}", output_dir)
-        )
+        # Determine if we should use the built-in OMRChecker or fallback to shell command
+        is_default_cmd = "OMRChecker" in cmd_template or getattr(sys, 'frozen', False)
 
-        if progress_callback:
-            progress_callback(f"Running:\n{cmd}")
+        if is_default_cmd:
+            if progress_callback:
+                progress_callback("Initializing built-in OMR Engine...")
+            try:
+                import logging
+                
+                # Create a custom log handler to stream logs to GUI callback
+                class GUIProgressLogHandler(logging.Handler):
+                    def __init__(self, callback):
+                        super().__init__()
+                        self.callback = callback
+                    def emit(self, record):
+                        try:
+                            msg = self.format(record)
+                            self.callback(msg)
+                        except Exception:
+                            pass
 
-        try:
+                # Add our handler to the root logger
+                handler = GUIProgressLogHandler(progress_callback)
+                handler.setFormatter(logging.Formatter('%(message)s'))
+                root_logger = logging.getLogger()
+                root_logger.addHandler(handler)
 
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=300
+                try:
+                    from src.entry import entry_point
+                    from pathlib import Path
+                    
+                    args = {
+                        "input_paths": [input_dir],
+                        "output_dir": output_dir,
+                        "debug": True,
+                        "autoAlign": False,
+                        "setLayout": False
+                    }
+                    
+                    for root_path in args["input_paths"]:
+                        entry_point(Path(root_path), args)
+                        
+                    if progress_callback:
+                        progress_callback("OMR completed successfully.")
+                        
+                finally:
+                    # Clean up handler
+                    root_logger.removeHandler(handler)
+
+            except Exception as e:
+                import traceback
+                print(traceback.format_exc())
+                raise Exception(f"OMR Engine error: {e}")
+        else:
+            # Fallback to subprocess execution (original logic)
+            cmd = (
+                cmd_template
+                .replace("{input}", input_dir)
+                .replace("{output}", output_dir)
             )
-            time.sleep(2)
-             # Show command output
-            print("========== STDOUT ==========")
-            print(result.stdout)
-
-            print("========== STDERR ==========")
-            print(result.stderr)
 
             if progress_callback:
-                progress_callback(result.stdout + "\n" + result.stderr)
+                progress_callback(f"Running:\n{cmd}")
 
-            if result.returncode != 0:
-                raise Exception(result.stderr)
+            try:
 
-            if progress_callback:
-                progress_callback("OMR completed successfully.")
+                result = subprocess.run(
+                    cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                time.sleep(2)
+                 # Show command output
+                print("========== STDOUT ==========")
+                print(result.stdout)
 
-            return result.stdout
+                print("========== STDERR ==========")
+                print(result.stderr)
 
-        except subprocess.TimeoutExpired:
-            raise Exception("OMR process timed out.")
+                if progress_callback:
+                    progress_callback(result.stdout + "\n" + result.stderr)
+
+                if result.returncode != 0:
+                    raise Exception(result.stderr)
+
+                if progress_callback:
+                    progress_callback("OMR completed successfully.")
+
+                return result.stdout
+
+            except subprocess.TimeoutExpired:
+                raise Exception("OMR process timed out.")
 
     # -------------------------------------------------------
     # CSV Files
