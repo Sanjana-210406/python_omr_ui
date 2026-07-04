@@ -303,7 +303,7 @@ class PDFProcessor:
         if progress_callback:
             progress_callback("Template copied successfully.")
 
-        return len(images)
+        return page_count
 
     # -------------------------------------------------------
     # Run OMR Command
