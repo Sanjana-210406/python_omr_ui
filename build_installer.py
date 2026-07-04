@@ -14,6 +14,19 @@ def build():
             except Exception as e:
                 print(f"Warning: Could not remove {folder}: {e}")
 
+    # Ensure all files we want to bundle exist (creates dummies for CI build if missing)
+    if not os.path.exists("samples"):
+        print("Creating empty samples directory for packaging...")
+        os.makedirs("samples", exist_ok=True)
+    if not os.path.exists("tests.db"):
+        print("Creating empty tests.db for packaging...")
+        with open("tests.db", "w") as f:
+            pass
+    if not os.path.exists("app_config.json"):
+        print("Creating empty app_config.json for packaging...")
+        with open("app_config.json", "w") as f:
+            f.write("{}")
+
     # Semicolon (;) is used as path separator on Windows, colon (:) on Mac/Linux
     sep = ";" if sys.platform == "win32" else ":"
 
