@@ -1,182 +1,131 @@
-# Test Manager App
+# Test Manager Application - Setup & User Manual
 
-A cross‑platform desktop GUI application (Tkinter) for managing test forms, processing PDFs, running external Python scripts, and uploading results to Google Firestore.
+This repository contains a cross-platform desktop GUI application (Tkinter) for managing OMR test forms, converting scanned PDFs into images, executing OMR evaluations, and syncing results with Google Firestore.
 
----
-
-## Features
-
-- **PIN‑protected access** – 6‑digit PIN with SHA‑256 hashing (default: `123456`).
-- **CRUD for test forms** – each test stores a name, date, and selected template folder.
-- **PDF processing** – convert PDF to images, clear input/output folders, copy a selected template (from a templates folder) into the input directory.
-- **Show PDF page count** – before processing, the app displays the number of pages.
-- **Run external command** – execute a custom Python command (e.g., `python3 main.py --inputDir {input} --outputDir {output}`) with placeholders for input/output directories.
-- **Live CSV preview** – after the command runs, the latest CSV from the output directory is displayed in a scrollable text area.
-- **Push CSV to Firestore** – upload the CSV data to a Firestore collection using a service account key.
-- **Settings page** – configure input/output directories, Python command, templates folder, Firestore auth key, collection name, and change the PIN.
-- **Background threading** – all long operations run in threads, keeping the UI responsive.
+This guide is structured into two parts:
+1. **Developer & Admin Setup**: For the technical team preparing, configuring, and maintaining the software.
+2. **School Setup & End-User Guide**: For school administrators and teachers running the software daily to process OMR sheets.
 
 ---
 
-## Requirements
+# PART 1: Developer & Admin Setup (Technical Team)
 
-### Python
-- Python 3.7 or higher
+This section explains the code architecture, how to configure Firestore, prepare OMR templates, and package settings.
 
-### Required Python Packages
-- `tkinter` (usually bundled with Python)
-- `PyPDF2` **or** `pypdf` (recommended)
-- `pdf2image`
-- `Pillow`
-- `google-cloud-firestore`
-- `shutil`, `subprocess`, `json`, `sqlite3`, `hashlib`, `csv`, `threading`, `datetime` – these are part of the standard library.
+## 1. Local Database & Config Architecture
+* **SQLite Database (`tests.db`)**: Holds exam metadata (ID, test name, date, template folder name) in a flat table named `tests`.
+* **Config File (`app_config.json`)**: Stores file paths, execution commands, and the default PIN. 
+  * The configuration supports platform-specific keys (e.g. `python_command_win32` vs `python_command_darwin`) to allow seamless usage across both Windows and macOS machines.
 
-Install all dependencies with:
+## 2. Google Cloud Firestore Setup
+To enable cloud synchronization of OMR results, configure Google Firestore:
+1. Create a Firebase/Google Cloud Project.
+2. Enable **Firestore Database** in Native mode.
+3. Go to **IAM & Admin → Service Accounts** in the GCP Console.
+4. Create a service account and assign the role **Cloud Datastore User** or **Firestore Data Owner**.
+5. Generate and download a new private key in **JSON** format.
+6. Provide this JSON file to the school administrators to load into their preferences.
 
+## 3. Creating & Packaging OMR Templates
+OMR Checker templates must be placed inside the `samples` (or `templates_dir`) folder. Each template must be a subdirectory containing:
+* `template.json`: Configures bubble layout coordinate maps.
+* `evaluation.json`: Configures the grading weights. Make sure it uses `"marking_schemes"` (plural) to comply with OMRChecker specifications.
+* `answer_key.csv`: A CSV map containing correct answers for all questions.
+* `omr_marker.jpg`: Alignment marker asset.
+
+## 4. Administrative Security (PIN Hashing)
+The login screen is protected by a 6-digit PIN.
+* PIN salt is set via `PIN_SALT` inside `index.py`.
+* The hash is computed using SHA-256 and stored as `pin_hash` inside `app_config.json`.
+* Default PIN is `123456`. You can update it using the GUI's **Settings → Change PIN** option.
+
+---
+
+# PART 2: School Setup & End-User Guide (School Staff)
+
+Welcome! This guide will help you install and run the Test Manager software on your school computers.
+
+## 1. Prerequisites (Installation)
+
+### Python Installation
+* Make sure Python 3.7 or higher is installed on your computer.
+
+### Package Installation
+Open your terminal (macOS) or Command Prompt (Windows) and install the required modules:
 ```bash
-pip install -r requirements.txt
-```
-or
-```bash
-pip install pypdf pdf2image Pillow google-cloud-firestore
+pip install pypdf pdf2image Pillow google-cloud-firestore opencv-python deepmerge dotmap jsonschema matplotlib numpy pandas rich screeninfo PyMuPDF
 ```
 
-> **Note:** `pypdf` is the actively maintained fork of `PyPDF2`. The code will fallback to other methods if it’s not installed.
-
-### Poppler (for PDF to image conversion)
-`pdf2image` requires **poppler** installed on your system:
-
-- **Windows**: download poppler binaries and add the `bin` folder to your `PATH`, or install via `conda install -c conda-forge poppler`.
-- **macOS**: `brew install poppler`
-- **Linux (Debian/Ubuntu)**: `sudo apt-get install poppler-utils`
-
-Verify installation by running `pdfinfo` in a terminal – it should print usage information.
-
----
-
-## Installation
-
-1. Clone or download this repository.
-2. Install the Python dependencies (see above).
-3. Make sure poppler is installed and in your `PATH`.
-4. Run the application:
-
-```bash
-python test_manager_app.py
-```
-
-On first run, the app creates a default configuration file (`app_config.json`) and a SQLite database (`tests.db`). The default PIN is `123456`.
+### Poppler Installation (Required for PDF processing)
+The application requires a helper tool called **Poppler** to read and convert PDF test papers.
+* **macOS (Apple Mac)**:
+  1. Open Terminal.
+  2. Install Homebrew (if not already installed) and run:
+     ```bash
+     brew install poppler
+     ```
+* **Windows**:
+  1. Download Poppler binaries (e.g., from conda-forge or standard release builds).
+  2. Extract the folder to a safe place (e.g., `C:\Program Files\poppler`).
+  3. Add the `bin` directory of Poppler (e.g., `C:\Program Files\poppler\Library\bin`) to your Windows System `PATH` environment variables.
 
 ---
 
-## Configuration (Settings)
-
-Go to **Settings → Preferences** to configure:
-
-| Setting                  | Description |
-|--------------------------|-------------|
-| **Input Directory**      | Where images and template files will be placed before running your script. |
-| **Output Directory**     | Where your script writes results (CSV files). |
-| **Python Command**       | The full command to run your script. Use `{input}` and `{output}` as placeholders. Example: `python3 main.py --inputDir {input} --outputDir {output}`. |
-| **Templates Folder**     | A directory that contains subfolders – each subfolder is a template. The app copies the contents of the selected template into the input directory during PDF processing. |
-| **Firestore Auth Key**   | Path to a service account JSON file for Firestore authentication. |
-| **Firestore Collection** | The collection name where CSV rows will be uploaded (default: `test_results`). |
-
-All settings are saved automatically in `app_config.json`.
-
----
-
-## How to Use
-
-### 1. Login
-Enter the 6‑digit PIN. The default is `123456`. You can change it later via **Settings → Change PIN**.
-
-### 2. Manage Tests
-- **Add Test**: fill in a name, date (YYYY-MM-DD), and choose a template folder from the dropdown (populated from your templates directory).
-- **Edit / Delete**: select a test from the list and use the corresponding buttons.
-
-### 3. Process a Test
-- Select a test in the list.
-- Click **Input PDF** and choose a PDF file.
-- The app will show the page count and ask for confirmation.
-- It then clears the input/output directories, converts each page of the PDF to a JPEG image (saved in the input directory), and copies the selected template folder’s contents into the input directory.
-
-### 4. Run the Python Command
-- Click **Run Command**.
-- The configured command is executed with the `{input}` and `{output}` placeholders replaced by the actual directories.
-- Any CSV file generated in the output directory is automatically displayed in the right panel.
-
-### 5. Push to Firestore
-- After the command runs and a CSV exists, click **Push to Firestore**.
-- The latest CSV (by modification time) is uploaded row‑by‑row to the configured Firestore collection.
-- A progress message appears in the status bar.
+## 2. Configuration & Preferences
+1. Run the application:
+   ```bash
+   python3 index.py
+   ```
+2. Log in using your 6-digit PIN (Default: `123456`).
+3. In the menu bar, go to **Settings → Preferences**.
+4. Configure the folders:
+   * **Input Directory**: Create a folder on your computer (e.g., `inputs`) and select it. This is where scanned pages will be prepared.
+   * **Output Directory**: Create a folder on your computer (e.g., `outputs`) and select it. This is where graded CSV results will be saved.
+   * **Templates Folder**: Choose the folder where your OMR templates are stored (e.g., `samples`).
+   * **Python Command**: Enter the path to your OMR evaluation script. Use `{input}` and `{output}` as placeholders:
+     * *Windows Example:* `py C:\OMRChecker-master\main.py --inputDir {input} --outputDir {output}`
+     * *macOS Example:* `python3 /Users/yourusername/OMRChecker-master/main.py --inputDir {input} --outputDir {output}`
+   * **Firestore Auth Key**: Browse and load the Google Cloud credentials JSON file provided by your technical team.
+   * **Firestore Collection**: Set the database collection name (default: `test_results`).
+5. Click **Save**.
 
 ---
 
-## File Structure
+## 3. Standard Workflow (How to process exams)
 
-```
-.
-├── test_manager_app.py   # Main application code
-├── app_config.json       # Settings (created on first run)
-├── tests.db              # SQLite database for test metadata
-└── README.md
-```
+Follow these steps for every OMR test you need to grade:
 
----
+### Step A: Add a Test Exam
+1. Click **Add Test** on the dashboard.
+2. Enter the **Test Name** and **Date (YYYY-MM-DD)**.
+3. Select the appropriate layout template from the **Template Folder** dropdown list.
+4. Click **Save**.
 
-## Developer Notes
+### Step B: Load and Convert the Scan PDF
+1. Select your test from the left-hand menu.
+2. Click **Input PDF**.
+3. Choose the scanned PDF containing all student answer sheets.
+4. Confirm the page count on the pop-up window. The app will automatically split the PDF into page images and copy the layout template.
 
-### Code Overview
+### Step C: Run OMR Grading
+1. Click **Run Command**.
+2. Click **Yes** to confirm.
+3. The OMR engine will grade the sheets. Once finished, a table preview of the results containing student scores, Roll Numbers, and marked answers will load automatically on the right panel.
 
-- **Database**: SQLite (`tests.db`) with a simple `tests` table.
-- **Settings**: managed by `SettingsManager` – loads/saves JSON.
-- **PDF Processing**: handled by `PDFProcessor` – uses `pypdf`/`pdfinfo` for page count, `pdf2image` for conversion.
-- **Firestore Upload**: `FirestoreUploader` – uses `google-cloud-firestore`.
-- **GUI**: built with `tkinter` – `TestManagerApp` is the main class.
-
-### Adding a New Feature
-
-- All heavy operations (PDF conversion, command execution, upload) run in background threads to avoid freezing the UI. Use the `threading` module and update the GUI via `root.after()`.
-- The status bar (`self.status_var`) is updated to show progress.
-- The CSV preview is a simple `ScrolledText` widget – you could replace it with a `Treeview` for a more structured table display.
-
-### Customising the PDF Conversion
-
-- The app saves images as JPEG. To change format or quality, modify the `process_pdf` method in `PDFProcessor`.
-
-### Changing the Default PIN
-
-- The default PIN is `123456` – it is hashed with SHA‑256 and stored in `app_config.json`. You can change it via the GUI or by editing the JSON manually (but the hash must be recomputed).
+### Step D: Sync Results with Cloud
+1. Click **Push to Firestore**.
+2. Confirm the prompt to upload. 
+3. The results will be pushed directly to your school cloud database!
 
 ---
 
-## Security Considerations
+## 4. Troubleshooting Guide for Staff
 
-- **PIN**: Stored as a SHA‑256 hash with a fixed salt. This is not production‑grade security, but suitable for a local desktop tool.
-- **Firestore**: The service account key JSON file grants full read/write access to your Firestore database. Protect it and do not commit it to version control.
-- The application does not encrypt the `app_config.json` or the SQLite database – they are stored in plain text.
-
----
-
-## Troubleshooting
-
-### The app does not start or shows no window
-- Ensure Tkinter is installed: `python3 -c "import tkinter; tkinter._test()"`.
-- Run with `python3 test_manager_app.py 2>&1 | tee error.log` to capture errors.
-- Check the working directory – the script must have write permissions to create `app_config.json` and `tests.db`.
-
-### “Unable to get page count. Is poppler installed and in PATH?”
-- Install poppler (see Requirements).
-- The app tries multiple methods: `pypdf` (recommended), `pdf2image` with auto‑detected poppler path, and direct `pdfinfo` call. If you still see this error, install `pypdf` (`pip install pypdf`).
-- If you manually installed poppler in a non‑standard location, you can set the `POPPLER_PATH` environment variable or modify the code to pass the path explicitly.
-
-### Firestore upload fails
-- Verify the service account JSON path is correct and the file exists.
-- Ensure the service account has the **Firestore Data Owner** role (or equivalent) for the project.
-- Check that your internet connection allows access to Google Cloud.
-
-### The command runs but no CSV appears
-- Make sure your script actually writes a CSV file to the output directory.
-- Check the command syntax – use `{input}` and `{output}` as placeholders in the Settings.
-- If your script produces a CSV with a different name, the app will still show the latest (by modification time) CSV.
+* **Error: "Unable to read PDF. Is poppler installed?"**
+  * Make sure you installed Poppler according to the instructions in Section 1. If on Windows, ensure Poppler's `bin` folder is correctly added to your system `PATH`.
+* **Error: "Template folder '...' not found."**
+  * Check that your **Templates Folder** in Preferences contains the folder name selected for this test.
+* **The CSV Preview shows old values or doesn't update.**
+  * Click on another test name on the left sidebar and click back to force the preview window to reload.
+* **Error: "Firestore Auth Key not found."**
+  * Go to **Settings → Preferences** and check that you have selected a valid credentials JSON key file.
