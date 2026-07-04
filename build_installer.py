@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import shutil
+import PyInstaller.__main__
 
 def build():
     print("=== Step 1: Cleaning up previous builds ===")
@@ -18,7 +19,6 @@ def build():
 
     # PyInstaller packaging arguments
     pyinstaller_args = [
-        sys.executable, "-m", "PyInstaller",
         "--windowed",                 # Hides terminal/console window
         "--name=OMRTestManager",       # Output application name
         f"--add-data=samples{sep}samples",     # Bundle OMR template files
@@ -32,12 +32,14 @@ def build():
         pyinstaller_args.append("--onefile")
 
     print("\n=== Step 2: Running PyInstaller ===")
-    print("Running command:", " ".join(pyinstaller_args))
+    print("Running command: pyinstaller", " ".join(pyinstaller_args))
     
-    result = subprocess.run(pyinstaller_args, shell=True if sys.platform == "win32" else False)
-    if result.returncode != 0:
-        print("Error: PyInstaller build failed!")
-        sys.exit(result.returncode)
+    try:
+        PyInstaller.__main__.run(pyinstaller_args)
+    except SystemExit as e:
+        if e.code != 0:
+            print("Error: PyInstaller build failed with code:", e.code)
+            sys.exit(e.code)
 
     print("\n=== Step 3: PyInstaller build successful! ===")
 
