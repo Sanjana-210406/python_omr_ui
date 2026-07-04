@@ -11,15 +11,11 @@ import time
 from datetime import datetime
 from tkinter import *
 from tkinter import ttk, filedialog, messagebox, scrolledtext
-from pdf2image import pdfinfo_from_path
-from pdf2image.pdf2image import pdfinfo_from_path
-from PyPDF2 import PdfReader
-from pdf2image import convert_from_path
-from pdf2image.pdf2image import pdfinfo_from_path
-
-# Third-party imports
-from PyPDF2 import PdfReader
-from pdf2image import convert_from_path
+from pdf2image import convert_from_path, pdfinfo_from_path
+try:
+    from pypdf import PdfReader
+except ImportError:
+    from PyPDF2 import PdfReader
 from google.cloud import firestore
 from google.oauth2 import service_account
 
@@ -113,10 +109,28 @@ class SettingsManager:
             json.dump(self.data, f, indent=4)
 
     def get(self, key, default=None):
+        if key in ["input_dir", "output_dir", "python_command", "templates_dir"]:
+            platform_key = f"{key}_{sys.platform}"
+            if platform_key in self.data:
+                return self.data[platform_key]
+            if sys.platform == "win32" and key in self.data:
+                return self.data[key]
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            defaults_map = {
+                "input_dir": os.path.join(base_dir, "inputs"),
+                "output_dir": os.path.join(base_dir, "outputs"),
+                "templates_dir": os.path.join(base_dir, "samples"),
+                "python_command": "python3 main.py --inputDir {input} --outputDir {output}"
+            }
+            return defaults_map.get(key, default)
         return self.data.get(key, default)
 
     def set(self, key, value):
-        self.data[key] = value
+        if key in ["input_dir", "output_dir", "python_command", "templates_dir"]:
+            platform_key = f"{key}_{sys.platform}"
+            self.data[platform_key] = value
+        else:
+            self.data[key] = value
         self.save()
 
     def verify_pin(self, pin):
@@ -137,6 +151,8 @@ class PDFProcessor:
 
         # Change this path if your Poppler is installed elsewhere.
         self.poppler_path = r"C:\Users\HP\Downloads\Release-26.02.0-0\poppler-26.02.0\Library\bin"
+        if not os.path.exists(self.poppler_path):
+            self.poppler_path = None
 
     # -------------------------------------------------------
     # Get PDF Page Count
@@ -733,7 +749,7 @@ class TestManagerApp:
         csv_files = self.processor.get_csv_files(output_dir)
         if csv_files:
             # Pick the most recent CSV (by file modification time)
-            csv_files.sort(key=lambda f: os.path.getmtime(os.path.join(output_dir, f)), reverse=True)
+            csv_files.sort(key=os.path.getmtime, reverse=True)
             latest = csv_files[0]
             csv_path = latest
             try:
@@ -741,13 +757,36 @@ class TestManagerApp:
                 if rows:
                     # Display as a simple table in text area
                     self.output_text.delete(1.0, END)
-                    # Show headers
-                    headers = list(rows[0].keys())
-                    header_line = "\t".join(headers)
+                    # Filter out path columns for a cleaner display
+                    headers = [h for h in rows[0].keys() if h not in ["input_path", "output_path"]]
+                    
+                    # Create readable display headers
+                    display_headers = []
+                    for h in headers:
+                        if h == "file_id":
+                            display_headers.append("Page")
+                        elif h == "Roll_no":
+                            display_headers.append("Roll No")
+                        elif h.startswith("q") and h[1:].isdigit():
+                            display_headers.append(h.upper())  # Q1, Q2, etc.
+                        else:
+                            display_headers.append(h.title())
+                            
+                    header_line = "\t".join(display_headers)
                     self.output_text.insert(END, header_line + "\n")
-                    self.output_text.insert(END, "-" * len(header_line) + "\n")
+                    self.output_text.insert(END, "-" * (len(header_line) + 15) + "\n")
+                    
                     for row in rows:
-                        line = "\t".join(str(row.get(h, "")) for h in headers)
+                        row_values = []
+                        for h in headers:
+                            val = row.get(h, "")
+                            if h == "file_id":
+                                # Format "page_1.jpg" to "Page 1"
+                                clean_val = str(val).replace("page_", "").replace(".jpg", "").replace(".png", "").replace(".jpeg", "")
+                                row_values.append(f"Page {clean_val}")
+                            else:
+                                row_values.append(str(val))
+                        line = "\t".join(row_values)
                         self.output_text.insert(END, line + "\n")
                     self.status_var.set(f"Displayed CSV: {latest}")
                 else:
@@ -765,16 +804,16 @@ class TestManagerApp:
         if not self.current_test_data:
             return
         output_dir = self.settings.get("output_dir")
-        csv_path = latest
+        csv_files = self.processor.get_csv_files(output_dir)
         if not csv_files:
             messagebox.showwarning("No CSV", "No CSV files found in output directory to push.")
             return
 
         # Ask which CSV to push (or push the latest)
         # For simplicity, we push the latest
-        csv_files.sort(key=lambda f: os.path.getmtime(os.path.join(output_dir, f)), reverse=True)
-        latest = csv_files[0]
-        csv_path = os.path.join(output_dir, latest)
+        csv_files.sort(key=os.path.getmtime, reverse=True)
+        csv_path = csv_files[0]
+        latest = os.path.basename(csv_path)
 
         if not messagebox.askyesno("Push to Firestore", f"Push '{latest}' to Firestore?"):
             return

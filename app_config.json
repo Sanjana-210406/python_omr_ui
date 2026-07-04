@@ -3,6 +3,10 @@
     "output_dir": "C:\\Users\\HP\\OneDrive\\Desktop\\OMRChecker-master\\outputs",
     "python_command": "py \"C:\\Users\\HP\\OneDrive\\Desktop\\OMRChecker-master\\main.py\" --inputDir \"{input}\" --outputDir \"{output}\"",
     "templates_dir": "C:\\Users\\HP\\OneDrive\\Desktop\\OMRChecker-master\\samples",
+    "input_dir_darwin": "inputs",
+    "output_dir_darwin": "outputs",
+    "python_command_darwin": "python3 ../OMRChecker-master/main.py --inputDir {input} --outputDir {output}",
+    "templates_dir_darwin": "samples",
     "firestore_auth_key": "",
     "firestore_collection": "test_results",
     "pin_hash": "b793b8a2a836ace068aa00d005f04f590e0abd13961f41d26ec52376e0eb7ea1"
