@@ -124,3 +124,16 @@ The build successfully compiled, bundled all dependencies into a single standalo
 * Built and verified the macOS standalone disk image installer (`dist/OMRTestManager.dmg`) using the local `build_installer.py` script.
 * Verified that the automated CI/CD pipeline on GitHub successfully compiled the corresponding Windows standalone `.exe` installer.
 
+---
+
+## Step 8: Project Completion & Installer Distribution
+
+### Goal
+Deliver both the updated Mac and Windows installers to the school to finalize the project deployment.
+
+### What We Did
+* **Mac App Distribution**: Located and prepared `dist/OMRTestManager.dmg` built locally on the macOS system.
+* **Windows App Distribution**: Downloaded the compiled `OMRTestManager.exe` executable from the GitHub Actions CI pipeline.
+* **Documentation & Submission**: Updated `README.md` and `PROMPT.md` with final release notes, pushed all updates, and created the final upstream Pull Request (`PR #4`). Both cross-platform installers are ready to be sent to the school.
+
+
