@@ -189,4 +189,18 @@ Deliver both the updated Mac and Windows installers to the school to finalize th
 * **Windows App Distribution**: Downloaded the compiled `OMRTestManager.exe` executable from the GitHub Actions CI pipeline.
 * **Documentation & Submission**: Updated `README.md` and `PROMPT.md` with final release notes, pushed all updates, and created the final upstream Pull Request (`PR #4`). Both cross-platform installers are ready to be sent to the school.
 
+---
 
+## Step 9: Option Analysis, 60Q Template, and Robust Answer Key Validation
+
+### Goal
+Implement a pixel-perfect 60-question template for the school's IIT sheet, resolve question-count validation crashes with 120-question CSVs, and generate Option Analysis reports.
+
+### What We Did
+* **60Q Standard Template**: Configured exact bubble mapping for Mathematics (Q1-Q20), Physics (Q21-Q35), Chemistry (Q36-Q50), and MAT (Q51-Q60).
+* **Option Analysis report**: Programmed `generate_option_analysis` in `src/entry.py` to compile student response frequencies and correctness rates, saving the report as `Option_Analysis.csv`.
+* **Key Validation Filtering**: Programmed `src/evaluation.py` to automatically filter answer key questions lists to only match the template's output columns, preventing crashes when using a 120-question CSV with a 60-question template.
+* **Release & Pushing**: Pushed all updates to the remote GitHub fork repository to trigger automated cloud compilation of the Windows installer.
+
+### Commit
+`2fa619b`

@@ -176,3 +176,8 @@ This section details the historical developer steps, prompts, commits, and debug
 ## Step 8: Project Completion & Installer Distribution
 * **What We Did**: Generated and validated the final installers on macOS (`.dmg`) and Windows (`.exe` via GitHub Actions), updated all manuals with installer guides, and submitted the upstream Pull Request #4.
 
+## Step 9: Option Analysis, 60Q Template, and Robust Answer Key Validation
+* **What We Did**: Created a pixel-perfect 60-question `Standard_Template` layout that precisely targets the school's OMR sheet (Mathematics 20Q, Physics 15Q, Chemistry 15Q, and MAT 10Q). Added a post-processing Option Analysis report generator that outputs selection statistics and success rates for each question in `Option_Analysis.csv`. Modified the OMR engine's verification step to automatically filter and align the answer key questions list to match the template's output columns (allowing 120-question keys to run seamlessly on 60-question templates).
+* **Commit**: `2fa619b`
+
+
