@@ -141,3 +141,43 @@ Follow these steps for every OMR test you need to grade:
   * Click on another test name on the left sidebar and click back to force the preview window to reload.
 * **Error: "Firestore Auth Key not found."**
   * Go to **Settings → Preferences** and check that you have selected a valid credentials JSON key file.
+
+---
+
+# PART 3: AI Pair Programming History & Prompt Log
+
+This section details the historical developer steps, prompts, commits, and debugging processes that took place during development.
+
+## Step 1: macOS Compatibility & Firestore Bug Fixes
+* **What We Did**: Added platform-specific configuration keys (`_darwin`, `_win32`) in `SettingsManager` to support multi-platform user environments, fixed Poppler paths, and cleared Firestore variable NameErrors.
+* **Commit**: `82dd9bd`
+
+## Step 2: CSV Preview Formatting & Indentation Error
+* **What We Did**: Filtered path columns from CSV preview, formatted file labels (e.g. `page_1.jpg` -> `Page 1`), and resolved a start-up indent block issue.
+
+## Step 3: Documentation Separation
+* **What We Did**: Restructured the documentation into developer setup (Part 1) and end-user setup (Part 2) guides.
+
+## Step 4: Standalone Packaging & Eliminating Poppler
+* **What We Did**: Replaced `pdf2image` (Poppler dependent) with `pymupdf` (pure python PDF library) to completely eliminate Poppler dependencies. Bundled OMRChecker directly inside the app folder to run programmatically.
+* **Commit**: `758897a`
+
+## Step 5: Windows Executable & CI Build Errors
+* **What We Did**: Added `build_installer_win.bat` for local Windows compiling and created a GitHub Actions workflow (`build.yml`) to build the Windows `.exe` automatically on push.
+* **Commit**: `860c3c9`
+
+## Step 6: OMR Refinements, Directory Isolation, and Crash Fixes
+* **What We Did**: Isolated test folders by test ID, fixed relative path alignment issues, disabled OpenCV thread debug popups causing Cocoa GUI crashes on macOS, recursive template scanning, and resolved a page_count `NameError` crash.
+* **Commits**: `7f76f8f` to `8f2a2ca`
+
+## Step 7: Packaging and Distributing Installers
+* **What We Did**: Successfully compiled the macOS standalone `.dmg` installer locally and verified automated compilation of the Windows `.exe` installer.
+
+## Step 8: Project Completion & Installer Distribution
+* **What We Did**: Generated and validated the final installers on macOS (`.dmg`) and Windows (`.exe` via GitHub Actions), updated all manuals with installer guides, and submitted the upstream Pull Request #4.
+
+## Step 9: Option Analysis, 60Q Template, and Robust Answer Key Validation
+* **What We Did**: Created a pixel-perfect 60-question `Standard_Template` layout that precisely targets the school's OMR sheet (Mathematics 20Q, Physics 15Q, Chemistry 15Q, and MAT 10Q). Added a post-processing Option Analysis report generator that outputs selection statistics and success rates for each question in `Option_Analysis.csv`. Modified the OMR engine's verification step to automatically filter and align the answer key questions list to match the template's output columns (allowing 120-question keys to run seamlessly on 60-question templates).
+* **Commit**: `2fa619b`
+
+

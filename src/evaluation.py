@@ -293,6 +293,16 @@ class EvaluationConfig:
             )
             answers_in_order = options["answers_in_order"]
 
+        # Filter questions and answers to only keep those present in the template's output columns
+        filtered_questions = []
+        filtered_answers = []
+        for q, ans in zip(self.questions_in_order, answers_in_order):
+            if q in template.output_columns:
+                filtered_questions.append(q)
+                filtered_answers.append(ans)
+        self.questions_in_order = filtered_questions
+        answers_in_order = filtered_answers
+
         self.validate_questions(answers_in_order)
 
         self.section_marking_schemes, self.question_to_scheme = {}, {}
