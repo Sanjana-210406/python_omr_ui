@@ -63,7 +63,17 @@ You can package this application into a standalone executable that runs without 
 
 Welcome! This guide will help you install and run the Test Manager software on your school computers.
 
-## 1. Prerequisites (Installation)
+> [!TIP]
+> **Recommended: Use Standalone Installers**
+> If your technical team has provided you with the standalone installer, you **do not** need to install Python or run terminal commands:
+> * **Windows**: Simply download `OMRTestManager.exe` and double-click to run it.
+> * **macOS**: Download `OMRTestManager.dmg`, open it, and drag **OMRTestManager** into your **Applications** folder. Right-click the app and choose **Open** the first time to bypass the Apple security prompt.
+
+---
+
+## 1. Prerequisites (Alternative: Developer/Source Installation)
+
+If you are running the software directly from the source code instead of the standalone installer, follow these steps:
 
 ### Python Installation
 * Make sure Python 3.7 or higher is installed on your computer.

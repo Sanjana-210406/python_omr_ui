@@ -91,3 +91,36 @@ The compiler failed immediately with `FileNotFoundError` because the `samples/` 
 
 ### CI Success (Run #4)
 The build successfully compiled, bundled all dependencies into a single standalone `OMRTestManager.exe` file, and uploaded it as a downloadable GitHub Actions artifact.
+
+---
+
+## Step 6: OMR Refinements, Directory Isolation, and Crash Fixes
+
+### What We Did
+* **Isolated Directories**: Appended test ID suffixes to inputs/outputs folders to prevent multiple exams from overwriting each other's files.
+* **Path Standardizing**: Converted path management internally to absolute paths to prevent runtime engine failures due to relative execution paths.
+* **PDF Verification**: Added a warning popup to prompt the user if they attempt to run OMR grading before importing/processing a scanned PDF.
+* **Cocoa GUI Crash Fix**: Disabled OpenCV/OMR debug window popups when OMRChecker is running in background threads, resolving thread-safety Cocoa GUI crashes on macOS.
+* **Recursive Templates**: Programmed the template selection dropdown to scan directories recursively, finding all folders that contain `template.json`.
+* **Bug Fixes**: Resolved a `NameError` inside `process_pdf` by properly returning the computed `page_count`.
+
+### Commits
+* `7f76f8f` - *Isolate test input/output directories by test ID to fix shared outputs bug*
+* `5d893e7` - *Auto-create test subfolders if they do not exist*
+* `1f4da3b` - *Convert relative paths to absolute internally to align shell and GUI executions*
+* `a568430` - *Show warning if user runs command without loading a PDF first*
+* `a2e90a6` - *Auto-import sample images from template folder if input directory is empty*
+* `0c6a26e` - *Copy template config files (template.json) when auto-importing sample images*
+* `bde338e` - *Disable OMR debug window popups in background thread to prevent Cocoa crashes*
+* `1e33460` - *Disable OMR graphical debug windows globally in GUI mode*
+* `727559c` - *Populate template dropdown recursively with folders containing template.json*
+* `8f2a2ca` - *Fix NameError in process_pdf by returning page_count*
+
+---
+
+## Step 7: Packaging and Distributing Installers
+
+### What We Did
+* Built and verified the macOS standalone disk image installer (`dist/OMRTestManager.dmg`) using the local `build_installer.py` script.
+* Verified that the automated CI/CD pipeline on GitHub successfully compiled the corresponding Windows standalone `.exe` installer.
+
