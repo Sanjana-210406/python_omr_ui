@@ -188,6 +188,124 @@ class PDFProcessor:
     def __init__(self, settings):
         self.settings = settings
 
+    def configure_answer_key(self, test_id, input_dir):
+        base_input_dir = self.settings.get("input_dir", raw=True)
+        
+        # Check which type was uploaded
+        found_ext = None
+        uploaded_path = None
+        for ext in [".csv", ".jpg", ".jpeg", ".png", ".json"]:
+            path = os.path.join(base_input_dir, f"answer_key_{test_id}{ext}")
+            if os.path.exists(path):
+                found_ext = ext
+                uploaded_path = path
+                break
+                
+        if not found_ext:
+            return
+            
+        # 1. If it's a JSON file, it replaces evaluation.json
+        if found_ext == ".json":
+            dst_evaluation_path = os.path.join(input_dir, "evaluation.json")
+            try:
+                shutil.copy2(uploaded_path, dst_evaluation_path)
+            except Exception as e:
+                print(f"Error copying evaluation JSON: {e}")
+            return
+            
+        # 2. If it's CSV, copy as answer_key.csv and configure evaluation.json
+        if found_ext == ".csv":
+            dst_csv_path = os.path.join(input_dir, "answer_key.csv")
+            try:
+                shutil.copy2(uploaded_path, dst_csv_path)
+            except Exception as e:
+                print(f"Error copying answer key CSV: {e}")
+                return
+                
+            evaluation_json_path = os.path.join(input_dir, "evaluation.json")
+            if os.path.exists(evaluation_json_path):
+                try:
+                    with open(evaluation_json_path, 'r') as f:
+                        data = json.load(f)
+                except Exception as e:
+                    print(f"Error loading evaluation.json: {e}")
+                    data = {}
+            else:
+                data = {}
+                
+            data["source_type"] = "csv"
+            if "options" not in data:
+                data["options"] = {}
+            data["options"]["answer_key_csv_path"] = "answer_key.csv"
+            if "answer_key_image_path" in data["options"]:
+                del data["options"]["answer_key_image_path"]
+            if "marking_schemes" not in data:
+                data["marking_schemes"] = {
+                    "DEFAULT": {
+                        "correct": "1",
+                        "incorrect": "0",
+                        "unmarked": "0"
+                    }
+                }
+            try:
+                with open(evaluation_json_path, 'w') as f:
+                    json.dump(data, f, indent=4)
+            except Exception as e:
+                print(f"Error writing evaluation.json: {e}")
+            return
+            
+        # 3. If it's an Image (jpg, jpeg, png), copy as answer_key.<ext> and configure evaluation.json
+        if found_ext in [".jpg", ".jpeg", ".png"]:
+            # Normalize extension to .jpg or .png
+            norm_ext = ".jpg" if found_ext in [".jpg", ".jpeg"] else ".png"
+            dst_img_name = f"answer_key{norm_ext}"
+            dst_img_path = os.path.join(input_dir, dst_img_name)
+            try:
+                shutil.copy2(uploaded_path, dst_img_path)
+            except Exception as e:
+                print(f"Error copying answer key Image: {e}")
+                return
+                
+            evaluation_json_path = os.path.join(input_dir, "evaluation.json")
+            if os.path.exists(evaluation_json_path):
+                try:
+                    with open(evaluation_json_path, 'r') as f:
+                        data = json.load(f)
+                except Exception as e:
+                    print(f"Error loading evaluation.json: {e}")
+                    data = {}
+            else:
+                data = {}
+                
+            data["source_type"] = "csv"
+            if "options" not in data:
+                data["options"] = {}
+            data["options"]["answer_key_csv_path"] = "answer_key.csv"
+            data["options"]["answer_key_image_path"] = dst_img_name
+            
+            # Make sure we don't have a stray answer_key.csv left over in the folder
+            stray_csv = os.path.join(input_dir, "answer_key.csv")
+            if os.path.exists(stray_csv):
+                try:
+                    os.remove(stray_csv)
+                except Exception as e:
+                    print(f"Error removing stray CSV: {e}")
+                    
+            if "marking_schemes" not in data:
+                data["marking_schemes"] = {
+                    "DEFAULT": {
+                        "correct": "1",
+                        "incorrect": "0",
+                        "unmarked": "0"
+                    }
+                }
+            try:
+                with open(evaluation_json_path, 'w') as f:
+                    json.dump(data, f, indent=4)
+            except Exception as e:
+                print(f"Error writing evaluation.json: {e}")
+            return
+
     # -------------------------------------------------------
     # Get PDF Page Count
     # -------------------------------------------------------
@@ -303,12 +421,22 @@ class PDFProcessor:
         if progress_callback:
             progress_callback("Template copied successfully.")
 
+        # Configure uploaded answer key if exists
+        test_id = getattr(self.settings, "current_test_id", None)
+        if test_id is not None:
+            self.configure_answer_key(test_id, input_dir)
+
         return page_count
 
     # -------------------------------------------------------
     # Run OMR Command
     # -------------------------------------------------------
     def run_command(self, progress_callback=None):
+
+        test_id = getattr(self.settings, "current_test_id", None)
+        input_dir = self.settings.get("input_dir")
+        if test_id is not None:
+            self.configure_answer_key(test_id, input_dir)
 
         cmd_template = self.settings.get("python_command")
 
@@ -642,7 +770,15 @@ class TestManagerApp:
                     "date": values[2],
                     "template": values[3]
                 }
-                self.test_info_label.config(text=f"Test: {values[1]} | Template: {values[3]}")
+                # Check for answer key
+                base_input_dir = self.settings.get("input_dir", raw=True)
+                key_status = "None"
+                for ext in [".csv", ".jpg", ".jpeg", ".png", ".json"]:
+                    uploaded_key = os.path.join(base_input_dir, f"answer_key_{self.current_test_id}{ext}")
+                    if os.path.exists(uploaded_key):
+                        key_status = f"Uploaded ({ext[1:].upper()})"
+                        break
+                self.test_info_label.config(text=f"Test: {values[1]} | Template: {values[3]} | Answer Key: {key_status}")
                 self.btn_input_pdf.config(state=NORMAL)
                 self.btn_run.config(state=NORMAL)
                 self.btn_push.config(state=NORMAL)
@@ -674,7 +810,7 @@ class TestManagerApp:
     def _open_test_dialog(self, title, test_data):
         dialog = Toplevel(self.root)
         dialog.title(title)
-        dialog.geometry("400x250")
+        dialog.geometry("500x300")
         dialog.transient(self.root)
         dialog.grab_set()
 
@@ -695,6 +831,45 @@ class TestManagerApp:
         name_var = StringVar()
         date_var = StringVar()
         template_var = StringVar()
+        csv_file_path_var = StringVar()
+
+        test_id = test_data[0] if test_data else None
+        has_existing_key = False
+        existing_filename = ""
+        if test_id:
+            base_input_dir = self.settings.get("input_dir", raw=True)
+            for ext in [".csv", ".jpg", ".jpeg", ".png", ".json"]:
+                path = os.path.join(base_input_dir, f"answer_key_{test_id}{ext}")
+                if os.path.exists(path):
+                    existing_filename = f"answer_key{ext}"
+                    csv_file_path_var.set(f"Already uploaded ({existing_filename})")
+                    has_existing_key = True
+                    break
+            if not has_existing_key:
+                csv_file_path_var.set("No file selected")
+        else:
+            csv_file_path_var.set("No file selected")
+
+        selected_csv = [None]
+        
+        def browse_csv():
+            path = filedialog.askopenfilename(
+                title="Select Answer Key File",
+                filetypes=[
+                    ("CSV Files", "*.csv"),
+                    ("Image Files", "*.jpg *.jpeg *.png"),
+                    ("JSON Files", "*.json"),
+                    ("All Files", "*")
+                ]
+            )
+            if path:
+                ext = os.path.splitext(path)[1].lower()
+                selected_csv[0] = (path, ext)
+                csv_file_path_var.set(os.path.basename(path))
+
+        def clear_csv():
+            selected_csv[0] = "CLEAR"
+            csv_file_path_var.set("No file selected")
 
         if test_data:
             name_var.set(test_data[1])
@@ -719,6 +894,17 @@ class TestManagerApp:
         elif template_options:
             template_combo.set(template_options[0])
 
+        Label(dialog, text="Answer Key CSV/Img/JSON:").grid(row=3, column=0, sticky=W, padx=5, pady=5)
+        csv_info_frame = Frame(dialog)
+        csv_info_frame.grid(row=3, column=1, sticky=W, padx=5, pady=5)
+        
+        csv_label = Label(csv_info_frame, textvariable=csv_file_path_var, width=20, anchor=W)
+        if has_existing_key:
+            csv_label.config(fg="green")
+        csv_label.pack(side=LEFT)
+        Button(csv_info_frame, text="Browse...", command=browse_csv).pack(side=LEFT, padx=2)
+        Button(csv_info_frame, text="Clear", command=clear_csv).pack(side=LEFT, padx=2)
+
         def save():
             name = name_var.get().strip()
             date = date_var.get().strip()
@@ -735,20 +921,56 @@ class TestManagerApp:
             if test_data:
                 # Update
                 self.db.update_test(test_data[0], name, date, template)
+                inserted_id = test_data[0]
             else:
                 # Insert
-                self.db.insert_test(name, date, template)
+                inserted_id = self.db.insert_test(name, date, template)
+                
+            # Save uploaded answer key if one was selected
+            if inserted_id:
+                base_input_dir = self.settings.get("input_dir", raw=True)
+                os.makedirs(base_input_dir, exist_ok=True)
+                
+                # If we cleared or selected a new one, delete any old ones first
+                if selected_csv[0] == "CLEAR" or selected_csv[0] is not None:
+                    for ext in [".csv", ".jpg", ".jpeg", ".png", ".json"]:
+                        old_path = os.path.join(base_input_dir, f"answer_key_{inserted_id}{ext}")
+                        if os.path.exists(old_path):
+                            try:
+                                os.remove(old_path)
+                            except Exception as e:
+                                print(f"Error removing old key: {e}")
+                                
+                if selected_csv[0] is not None and selected_csv[0] != "CLEAR":
+                    src_path, ext = selected_csv[0]
+                    target_path = os.path.join(base_input_dir, f"answer_key_{inserted_id}{ext}")
+                    try:
+                        shutil.copy2(src_path, target_path)
+                    except Exception as e:
+                        messagebox.showerror("Error", f"Failed to save answer key file: {e}")
+                        return
+                        
             self.refresh_test_list()
             dialog.destroy()
 
-        Button(dialog, text="Save", command=save, width=10).grid(row=3, column=0, pady=10)
-        Button(dialog, text="Cancel", command=dialog.destroy, width=10).grid(row=3, column=1, pady=10)
+        Button(dialog, text="Save", command=save, width=10).grid(row=4, column=0, pady=20)
+        Button(dialog, text="Cancel", command=dialog.destroy, width=10).grid(row=4, column=1, pady=20)
 
     def delete_test(self):
         if not self.current_test_id:
             messagebox.showwarning("No selection", "Please select a test to delete.")
             return
         if messagebox.askyesno("Delete", "Are you sure you want to delete this test?"):
+            # Delete uploaded answer key if exists
+            base_input_dir = self.settings.get("input_dir", raw=True)
+            for ext in [".csv", ".jpg", ".jpeg", ".png", ".json"]:
+                uploaded_key = os.path.join(base_input_dir, f"answer_key_{self.current_test_id}{ext}")
+                if os.path.exists(uploaded_key):
+                    try:
+                        os.remove(uploaded_key)
+                    except Exception as e:
+                        print(f"Error removing key on test delete: {e}")
+                        
             self.db.delete_test(self.current_test_id)
             self.refresh_test_list()
             self.on_test_select(None)  # clear selection

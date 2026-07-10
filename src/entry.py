@@ -383,6 +383,93 @@ def process_files(
             )
 
     print_stats(start_time, files_counter, tuning_config)
+    generate_option_analysis(outputs_namespace, template, evaluation_config)
+
+
+def generate_option_analysis(outputs_namespace, template, evaluation_config):
+    results_csv_path = outputs_namespace.filesMap.get("Results")
+    if not results_csv_path or not os.path.exists(results_csv_path):
+        logger.warning("Results CSV path not found, skipping option analysis.")
+        return
+        
+    try:
+        df = pd.read_csv(results_csv_path)
+        if len(df) == 0:
+            logger.info("Results CSV is empty, skipping option analysis.")
+            return
+            
+        student_df = df.copy()
+        if "page_1.png" in student_df["file_id"].values and "page_2.png" in student_df["file_id"].values:
+            student_df = student_df[student_df["file_id"] != "page_1.png"]
+        student_df = student_df[~student_df["file_id"].astype(str).str.contains("key", case=False)]
+        
+        if len(student_df) == 0:
+            logger.info("No student sheets found in Results, skipping option analysis.")
+            return
+            
+        analysis_rows = []
+        for q in template.output_columns:
+            if q not in student_df.columns:
+                continue
+                
+            correct_ans = ""
+            if evaluation_config and q in evaluation_config.question_to_answer_matcher:
+                matcher = evaluation_config.question_to_answer_matcher[q]
+                correct_ans = str(matcher.answer_item)
+                
+            col_data = student_df[q].fillna("").astype(str).str.strip().str.upper()
+            
+            count_a = sum(col_data == "A")
+            count_b = sum(col_data == "B")
+            count_c = sum(col_data == "C")
+            count_d = sum(col_data == "D")
+            count_unmarked = sum(col_data == "")
+            count_multiple = sum(col_data.str.len() > 1)
+            total_students = len(col_data)
+            
+            correct_count = 0
+            incorrect_count = 0
+            unmarked_count = 0
+            
+            for val in col_data:
+                if val == "":
+                    unmarked_count += 1
+                elif evaluation_config and q in evaluation_config.question_to_answer_matcher:
+                    matcher = evaluation_config.question_to_answer_matcher[q]
+                    verdict, _ = matcher.get_verdict_marking(val)
+                    if verdict.startswith("correct"):
+                        correct_count += 1
+                    elif verdict == "unmarked":
+                        unmarked_count += 1
+                    else:
+                        incorrect_count += 1
+                else:
+                    incorrect_count += 1
+                    
+            pct_correct = f"{(correct_count / total_students * 100):.2f}%" if total_students > 0 else "0.00%"
+            
+            analysis_rows.append({
+                "Question": q,
+                "Correct Answer": correct_ans,
+                "A Count": count_a,
+                "B Count": count_b,
+                "C Count": count_c,
+                "D Count": count_d,
+                "Multiple Count": count_multiple,
+                "Unmarked Count": count_unmarked,
+                "Total Students": total_students,
+                "Correct Count": correct_count,
+                "Incorrect Count": incorrect_count,
+                "Percent Correct": pct_correct
+            })
+            
+        analysis_df = pd.DataFrame(analysis_rows)
+        option_analysis_csv_path = outputs_namespace.paths.results_dir.joinpath("Option_Analysis.csv")
+        analysis_df.to_csv(option_analysis_csv_path, index=False)
+        logger.info(f"Generated Option Analysis report at: '{option_analysis_csv_path}'")
+        
+    except Exception as e:
+        logger.error(f"Error generating option analysis: {e}")
 
 
 def check_and_move(error_code, file_path, filepath2):
