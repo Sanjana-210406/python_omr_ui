@@ -4,6 +4,59 @@ This document records the step-by-step development journey of adding cross-platf
 
 ---
 
+# 🚀 QUICK START & USER MANUAL (For School Staff & Non-Technical Users)
+
+If you are a school administrator or teacher, you do not need to understand the programming details below. Here is everything you need to install, configure, and use the OMR Test Manager.
+
+## 📦 1. How to Install the App
+* **Windows Users**: 
+  1. Go to the GitHub repository: **`https://github.com/Sanjana-210406/python_omr_ui`**.
+  2. Click on the **Actions** tab, select the latest run of **"Build Windows Executable"**, scroll down to the bottom, and download the **`OMRTestManager-Windows`** artifact.
+  3. Extract the downloaded ZIP file.
+  4. Double-click the **`OMRTestManager.exe`** file to start the app.
+* **Mac Users**:
+  1. Open your project folder and go to the `dist` directory: `/Users/sunil_kadam/Desktop/python_omr_ui/dist`
+  2. Double-click the **`OMRTestManager.dmg`** file.
+  3. Drag the **OMRTestManager** app icon into your **Applications** folder.
+  4. To open it the first time: **Right-click** (or hold `Control` and click) the app icon in Applications, select **Open**, and click **Open** on the security warning.
+
+---
+
+## ⚙️ 2. First-Time Setup (Preferences)
+1. Run the application and log in using the default PIN: **`123456`**.
+2. Go to **Settings → Preferences** in the menu bar.
+3. Configure these five directories and settings:
+   * **Input Directory**: Create an empty folder on your computer (e.g., `inputs`) and choose it. This is where your exam sheet images will be loaded.
+   * **Output Directory**: Create an empty folder on your computer (e.g., `outputs`) and choose it. This is where graded results will be saved.
+   * **Templates Folder**: Select the folder containing your layouts (e.g., `samples`).
+   * **Python Command**: Enter the path to your OMR script. 
+     * *Windows Example:* `py C:\OMRChecker-master\main.py --inputDir {input} --outputDir {output}`
+     * *Mac Example:* `python3 /Users/yourusername/OMRChecker-master/main.py --inputDir {input} --outputDir {output}`
+   * **Firestore Auth Key**: Select the Google Cloud service account JSON key file provided by your technical coordinator.
+4. Click **Save**.
+
+---
+
+## 📝 3. How to Grade Exams (Daily Workflow)
+* **Step A: Add the Test**: Click **Add Test** on the left. Enter the Test Name, the Date (format: `YYYY-MM-DD`), and select the template format from the dropdown menu. Click **Save**.
+* **Step B: Load scanned PDF**: Select the test on the left sidebar. Click **Input PDF**, choose your scanned exam PDF, and let the app split it into images automatically.
+* **Step C: Grade the Exam**: Click **Run Command** to start grading. The progress bar will load, and your student results table will automatically display on the right panel when finished.
+* **Step D: Save to Cloud**: Click **Push to Firestore** to sync your results to the online database.
+
+---
+
+## 🛠️ 4. Quick Troubleshooting
+* **"Template folder not found"**: Go to **Settings → Preferences** and verify that your **Templates Folder** points to the correct location.
+* **Results Table not updating**: Click another test on the left sidebar and then click back on the current test to reload the table.
+* **"Firestore Auth Key not found"**: Verify you selected your credentials JSON file in Preferences.
+
+---
+
+# 🛠️ DEVELOPER LOG & PAIR PROGRAMMING HISTORY
+The sections below detail the step-by-step programming progress for technical teams:
+
+---
+
 ## Step 1: macOS Compatibility & Firestore Bug Fixes
 
 ### Prompt / Goal
