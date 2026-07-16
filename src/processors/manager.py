@@ -51,7 +51,41 @@ class ProcessorManager:
         self.seen_paths = []
 
         logger.info(f'Loading processors from "{self.processors_dir}"...')
-        self.walk_package(self.processors_dir)
+        try:
+            self.walk_package(self.processors_dir)
+        except Exception as e:
+            logger.warning(f"Dynamic package walk failed: {e}")
+
+        # Always manually register built-in processors for PyInstaller/frozen compatibility
+        try:
+            from src.processors.CropOnMarkers import CropOnMarkers
+            self.processors["CropOnMarkers"] = CropOnMarkers
+            logger.info("Manually registered CropOnMarkers")
+        except Exception as e:
+            logger.warning(f"Failed to manually import CropOnMarkers: {e}")
+
+        try:
+            from src.processors.CropPage import CropPage
+            self.processors["CropPage"] = CropPage
+            logger.info("Manually registered CropPage")
+        except Exception as e:
+            logger.warning(f"Failed to manually import CropPage: {e}")
+
+        try:
+            from src.processors.FeatureBasedAlignment import FeatureBasedAlignment
+            self.processors["FeatureBasedAlignment"] = FeatureBasedAlignment
+            logger.info("Manually registered FeatureBasedAlignment")
+        except Exception as e:
+            logger.warning(f"Failed to manually import FeatureBasedAlignment: {e}")
+
+        try:
+            from src.processors.builtins import Levels, MedianBlur, GaussianBlur
+            self.processors["Levels"] = Levels
+            self.processors["MedianBlur"] = MedianBlur
+            self.processors["GaussianBlur"] = GaussianBlur
+            logger.info("Manually registered builtins (Levels, MedianBlur, GaussianBlur)")
+        except Exception as e:
+            logger.warning(f"Failed to manually import builtins: {e}")
 
     def walk_package(self, package):
         """walk the supplied package to retrieve all processors"""
