@@ -1100,6 +1100,8 @@ class TestManagerApp:
     def display_latest_csv(self):
         output_dir = self.settings.get("output_dir")
         csv_files = self.processor.get_csv_files(output_dir)
+        # Exclude Option Analysis CSV from student results preview
+        csv_files = [f for f in csv_files if os.path.basename(f) != "Option_Analysis.csv"]
         if csv_files:
             # Pick the most recent CSV (by file modification time)
             csv_files.sort(key=os.path.getmtime, reverse=True)
@@ -1134,9 +1136,11 @@ class TestManagerApp:
                         for h in headers:
                             val = row.get(h, "")
                             if h == "file_id":
-                                # Format "page_1.jpg" to "Page 1"
-                                clean_val = str(val).replace("page_", "").replace(".jpg", "").replace(".png", "").replace(".jpeg", "")
-                                row_values.append(f"Page {clean_val}")
+                                if str(val) == "Answer Key":
+                                    row_values.append("Answer Key")
+                                else:
+                                    clean_val = str(val).replace("page_", "").replace(".jpg", "").replace(".png", "").replace(".jpeg", "")
+                                    row_values.append(f"Page {clean_val}")
                             else:
                                 row_values.append(str(val))
                         line = "\t".join(row_values)
@@ -1158,6 +1162,8 @@ class TestManagerApp:
             return
         output_dir = self.settings.get("output_dir")
         csv_files = self.processor.get_csv_files(output_dir)
+        # Exclude Option Analysis CSV from Firestore upload list
+        csv_files = [f for f in csv_files if os.path.basename(f) != "Option_Analysis.csv"]
         if not csv_files:
             messagebox.showwarning("No CSV", "No CSV files found in output directory to push.")
             return
