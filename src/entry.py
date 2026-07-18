@@ -317,6 +317,13 @@ def _process_single_image(
     for k in template.output_columns:
         resp_array.append(omr_response[k])
 
+    if img_name.startswith("page_1."):
+        # Set Roll_no to "KEY"
+        if "Roll_no" in template.output_columns:
+            idx = template.output_columns.index("Roll_no")
+            resp_array[idx] = "KEY"
+        img_name = "Answer Key"
+
     outputs_namespace.OUTPUT_SET.append([img_name] + resp_array)
 
     if multi_marked == 0 or not tuning_config.outputs.filter_out_multimarked_files:
@@ -359,6 +366,43 @@ def process_files(
     start_time = int(time())
     files_counter = 0
     STATS.files_not_moved = 0
+
+    # 1. Parse the first page of the PDF (the teacher's key sheet) to get the answer key
+    if omr_files and evaluation_config is not None:
+        key_file = omr_files[0]
+        logger.info(f"Extracting answer key from first page: {key_file.name}")
+        try:
+            images = ImageUtils.load_omr_image(key_file, tuning_config)
+            for img_name, in_omr in images:
+                in_omr_preprocessed = template.image_instance_ops.apply_preprocessors(
+                    img_name, in_omr, template
+                )
+                if in_omr_preprocessed is not None:
+                    response_dict, _, _, _ = template.image_instance_ops.read_omr_response(
+                        template, image=in_omr_preprocessed, name=str(img_name), save_dir=None
+                    )
+                    key_response = get_concatenated_response(response_dict, template)
+                    
+                    # Update evaluation_config answer key with these parsed answers
+                    parsed_answers = []
+                    for q in evaluation_config.questions_in_order:
+                        ans = key_response.get(q, "")
+                        parsed_answers.append(ans)
+                        
+                    evaluation_config.question_to_answer_matcher = evaluation_config.parse_answers_and_map_questions(
+                        parsed_answers
+                    )
+                    logger.info(f"Successfully loaded answer key from first page: {key_response}")
+                    
+                    # Also write these parsed answers to answer_key.csv in the input directory
+                    csv_path = Path(evaluation_config.path).parent.joinpath("answer_key.csv")
+                    with open(csv_path, 'w') as f:
+                        for q in evaluation_config.questions_in_order:
+                            ans = key_response.get(q, "")
+                            f.write(f"{q},{ans}\n")
+                    logger.info(f"Saved parsed answer key to {csv_path}")
+        except Exception as e:
+            logger.error(f"Failed to automatically extract answer key from first page: {e}")
 
     # Collect names from non-PDF files to detect collisions
     image_file_names = {f.name for f in omr_files if f.suffix.lower() != ".pdf"}
@@ -409,6 +453,8 @@ def generate_option_analysis(outputs_namespace, template, evaluation_config):
             
         analysis_rows = []
         for q in template.output_columns:
+            if not (q.startswith("q") and q[1:].isdigit()):
+                continue
             if q not in student_df.columns:
                 continue
                 

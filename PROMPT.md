@@ -204,3 +204,32 @@ Implement a pixel-perfect 60-question template for the school's IIT sheet, resol
 
 ### Commit
 `2fa619b`
+
+---
+
+## Step 10: PyInstaller Frozen Dynamic Loader Fix
+
+### Goal
+Resolve execution failures of compiled standalone binaries caused by dynamic walking of processors failing in frozen/bundled PyInstaller mode.
+
+### What We Did
+* **Explicit Processor Registration**: Updated `walk_package` fallback in `src/processors/manager.py` to catch loading exceptions and manually import and register the key built-in processor classes (`CropOnMarkers`, `CropPage`, `FeatureBasedAlignment`, `Levels`, `MedianBlur`, `GaussianBlur`). This ensures the OMRChecker workflow functions correctly inside single-file executables.
+
+### Commit
+`93b6345`
+
+---
+
+## Step 11: Auto-Extract Answer Key, Option Analysis Filtering, & GUI/Firestore Exclusions
+
+### Goal
+Allow the application to dynamically extract the answer key from the first page of the input PDF (which is the teacher's key sheet), fix key-value analysis processing errors, and ensure helper reports like `Option_Analysis.csv` are not misidentified as student submissions.
+
+### What We Did
+* **Dynamic Answer Key Extraction**: Programmed `src/entry.py` to parse the first page (`page_1.pdf`) of the scanned document, extract its responses, update the evaluation configuration dynamically, write the parsed answers to `answer_key.csv`, and output the entry with Roll Number set to `"KEY"` and File ID to `"Answer Key"`.
+* **Clean Option Analysis**: Filtered columns processed in `generate_option_analysis` to only target question fields (excluding identifiers/metadata columns).
+* **GUI & Database Exclusions**: Updated `index.py` to exclude `Option_Analysis.csv` from the student results table list and from Google Firestore push actions.
+
+### Commit
+`8ee0a0a`
+

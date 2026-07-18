@@ -180,4 +180,13 @@ This section details the historical developer steps, prompts, commits, and debug
 * **What We Did**: Created a pixel-perfect 60-question `Standard_Template` layout that precisely targets the school's OMR sheet (Mathematics 20Q, Physics 15Q, Chemistry 15Q, and MAT 10Q). Added a post-processing Option Analysis report generator that outputs selection statistics and success rates for each question in `Option_Analysis.csv`. Modified the OMR engine's verification step to automatically filter and align the answer key questions list to match the template's output columns (allowing 120-question keys to run seamlessly on 60-question templates).
 * **Commit**: `2fa619b`
 
+## Step 10: PyInstaller Frozen Dynamic Loader Fix
+* **What We Did**: Explicitly registered and imported built-in OMR Checker processor classes (CropOnMarkers, CropPage, FeatureBasedAlignment, Levels, MedianBlur, GaussianBlur) to prevent standalone compiled binaries from crashing during dynamic directory walks.
+* **Commit**: `93b6345`
+
+## Step 11: Auto-Extract Answer Key, Option Analysis Filtering, & GUI/Firestore Exclusions
+* **What We Did**: Implemented automatic answer key extraction from the first page of the scanned PDF (setting File ID to "Answer Key" and Roll Number to "KEY"), filtered metadata columns from Option Analysis stats, and hid `Option_Analysis.csv` from both the GUI table preview and Google Firestore sync list.
+* **Commit**: `8ee0a0a`
+
+
 
