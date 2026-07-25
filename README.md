@@ -188,5 +188,9 @@ This section details the historical developer steps, prompts, commits, and debug
 * **What We Did**: Implemented automatic answer key extraction from the first page of the scanned PDF (setting File ID to "Answer Key" and Roll Number to "KEY"), filtered metadata columns from Option Analysis stats, and hid `Option_Analysis.csv` from both the GUI table preview and Google Firestore sync list.
 * **Commit**: `8ee0a0a`
 
+## Step 12: FCM Push Notifications for Parents
+* **What We Did**: Added a one-click "Notify All Parents" button in the GUI and configured a new "Parent Tokens Collection" (default: `parent_tokens`) setting in Preferences. Implemented background execution logic that reads the latest OMR grading results, retrieves matching parent device registration tokens from Google Firestore (supporting lookups by document ID or fields matching student roll numbers), and pushes push notifications concurrently via the FCM v1 REST API.
+
+
 
 

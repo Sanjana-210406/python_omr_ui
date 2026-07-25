@@ -89,6 +89,7 @@ class SettingsManager:
             "templates_dir": "",
             "firestore_auth_key": "",  # path to service account JSON
             "firestore_collection": "test_results",
+            "parent_tokens_collection": "parent_tokens",
             "pin_hash": self._hash_pin("123456")  # default PIN: 123456
         }
         self.data = self._load()
@@ -728,6 +729,9 @@ class TestManagerApp:
         self.btn_push = Button(action_frame, text="Push to Firestore", command=self.push_to_firestore, state=DISABLED)
         self.btn_push.pack(side=LEFT, padx=2)
 
+        self.btn_notify = Button(action_frame, text="Notify All Parents", command=self.notify_parents, state=DISABLED)
+        self.btn_notify.pack(side=LEFT, padx=2)
+
         # Output display area
         self.output_frame = LabelFrame(right_frame, text="CSV Output", padx=5, pady=5)
         self.output_frame.pack(fill=BOTH, expand=True, pady=5)
@@ -782,6 +786,7 @@ class TestManagerApp:
                 self.btn_input_pdf.config(state=NORMAL)
                 self.btn_run.config(state=NORMAL)
                 self.btn_push.config(state=NORMAL)
+                self.btn_notify.config(state=NORMAL)
                 # Clear output display
                 self.output_text.delete(1.0, END)
                 # Check if CSV exists in output dir and display it
@@ -794,6 +799,7 @@ class TestManagerApp:
             self.btn_input_pdf.config(state=DISABLED)
             self.btn_run.config(state=DISABLED)
             self.btn_push.config(state=DISABLED)
+            self.btn_notify.config(state=DISABLED)
 
     # ---------- CRUD DIALOGS ----------
     def add_test_dialog(self):
@@ -1005,6 +1011,7 @@ class TestManagerApp:
         self.btn_input_pdf.config(state=DISABLED)
         self.btn_run.config(state=DISABLED)
         self.btn_push.config(state=DISABLED)
+        self.btn_notify.config(state=DISABLED)
 
         def process():
             try:
@@ -1017,12 +1024,14 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
 
         threading.Thread(target=process, daemon=True).start()
 
@@ -1075,6 +1084,7 @@ class TestManagerApp:
         self.btn_run.config(state=DISABLED)
         self.btn_input_pdf.config(state=DISABLED)
         self.btn_push.config(state=DISABLED)
+        self.btn_notify.config(state=DISABLED)
 
         def run():
             try:
@@ -1087,12 +1097,14 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1179,6 +1191,9 @@ class TestManagerApp:
 
         self.status_var.set("Pushing to Firestore...")
         self.btn_push.config(state=DISABLED)
+        self.btn_run.config(state=DISABLED)
+        self.btn_input_pdf.config(state=DISABLED)
+        self.btn_notify.config(state=DISABLED)
 
         def upload():
             try:
@@ -1189,12 +1204,242 @@ class TestManagerApp:
                 self.root.after(0, lambda: messagebox.showinfo("Success", "Data pushed to Firestore."))
                 self.root.after(0, lambda: self.status_var.set("Ready"))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
 
         threading.Thread(target=upload, daemon=True).start()
+
+    # ---------- NOTIFY PARENTS (FCM PUSH NOTIFICATIONS) ----------
+    def notify_parents(self):
+        if not self.current_test_data:
+            return
+
+        test_name = self.current_test_data["name"]
+        test_date = self.current_test_data["date"]
+        
+        output_dir = self.settings.get("output_dir")
+        csv_files = self.processor.get_csv_files(output_dir)
+        # Exclude Option Analysis CSV from notification processing
+        csv_files = [f for f in csv_files if os.path.basename(f) != "Option_Analysis.csv"]
+        if not csv_files:
+            messagebox.showwarning("No CSV", "No CSV files found in output directory to notify parents. Please run grading first.")
+            return
+
+        # Use the latest CSV results file
+        csv_files.sort(key=os.path.getmtime, reverse=True)
+        csv_path = csv_files[0]
+        latest = os.path.basename(csv_path)
+
+        auth_key_path = self.settings.get("firestore_auth_key")
+        if not auth_key_path or not os.path.exists(auth_key_path):
+            messagebox.showerror("Error", "Firestore auth key file not found. Please set it in Settings.")
+            return
+
+        if not messagebox.askyesno("Notify Parents", f"Send push notifications to all parents for test '{test_name}' using '{latest}'?"):
+            return
+
+        self.status_var.set("Sending notifications...")
+        self.btn_push.config(state=DISABLED)
+        self.btn_run.config(state=DISABLED)
+        self.btn_input_pdf.config(state=DISABLED)
+        self.btn_notify.config(state=DISABLED)
+
+        def run_notifications():
+            try:
+                # 1. Initialize Firestore
+                credentials = service_account.Credentials.from_service_account_file(auth_key_path)
+                db = firestore.Client(credentials=credentials)
+
+                # 2. Read CSV
+                rows = self.processor.read_csv(csv_path)
+                if not rows:
+                    raise Exception("CSV file is empty or invalid.")
+
+                # 3. Get Parent Collection setting
+                parent_tokens_col = self.settings.get("parent_tokens_collection", "parent_tokens")
+
+                processed_count = 0
+                success_count = 0
+                fail_count = 0
+                no_token_count = 0
+
+                # Define internal helpers for FCM
+                def get_parent_tokens(roll_no):
+                    tokens = []
+                    roll_no_str = str(roll_no).strip()
+                    if not roll_no_str:
+                        return tokens
+                    try:
+                        # Direct doc ID check
+                        doc_ref = db.collection(parent_tokens_col).document(roll_no_str)
+                        doc = doc_ref.get()
+                        if doc.exists:
+                            tokens.extend(extract_tokens(doc.to_dict()))
+                        
+                        # Query by fields
+                        for field in ["roll_no", "rollNo", "rollNumber", "student_id"]:
+                            for doc_snap in db.collection(parent_tokens_col).where(field, "==", roll_no_str).stream():
+                                tokens.extend(extract_tokens(doc_snap.to_dict()))
+
+                        # Numeric check
+                        if roll_no_str.isdigit():
+                            roll_no_int = int(roll_no_str)
+                            for field in ["roll_no", "rollNo", "rollNumber", "student_id"]:
+                                for doc_snap in db.collection(parent_tokens_col).where(field, "==", roll_no_int).stream():
+                                    tokens.extend(extract_tokens(doc_snap.to_dict()))
+                    except Exception as e:
+                        print(f"Error getting tokens for Roll No {roll_no_str}: {e}")
+                    return list(set([t for t in tokens if t]))
+
+                def extract_tokens(data):
+                    extracted = []
+                    for key in ["fcm_token", "fcm_tokens", "token", "tokens", "device_token", "device_tokens", "registration_token", "registration_tokens"]:
+                        val = data.get(key)
+                        if isinstance(val, list):
+                            for item in val:
+                                if isinstance(item, str) and item.strip():
+                                    extracted.append(item.strip())
+                        elif isinstance(val, str) and val.strip():
+                            extracted.append(val.strip())
+                    return extracted
+
+                def send_fcm(token, roll_no, score):
+                    try:
+                        import google.auth.transport.requests
+                        import urllib.request
+                        import urllib.parse
+                        
+                        # Authorize FCM scope
+                        fcm_credentials = service_account.Credentials.from_service_account_file(
+                            auth_key_path,
+                            scopes=["https://www.googleapis.com/auth/firebase.messaging"]
+                        )
+                        request = google.auth.transport.requests.Request()
+                        fcm_credentials.refresh(request)
+                        access_token = fcm_credentials.token
+                        project_id = fcm_credentials.project_id
+
+                        url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+                        
+                        title = f"OMR Test Result: {test_name}"
+                        body = f"Dear Parent, your child (Roll No: {roll_no}) scored {score} marks in the test '{test_name}'."
+                        
+                        payload = {
+                            "message": {
+                                "token": token,
+                                "notification": {
+                                    "title": title,
+                                    "body": body
+                                }
+                            }
+                        }
+                        
+                        data = json.dumps(payload).encode("utf-8")
+                        req = urllib.request.Request(url, data=data, method="POST")
+                        req.add_header("Authorization", f"Bearer {access_token}")
+                        req.add_header("Content-Type", "application/json; UTF-8")
+                        
+                        with urllib.request.urlopen(req, timeout=10) as response:
+                            response.read()
+                            return True
+                    except Exception as e:
+                        print(f"FCM Send Error for Roll No {roll_no}: {e}")
+                        return False
+
+                # Filter out key rows
+                student_rows = []
+                for row in rows:
+                    roll = str(row.get("Roll_no", "")).strip()
+                    file_id = str(row.get("file_id", "")).strip()
+                    if roll.upper() == "KEY" or "key" in file_id.lower():
+                        continue
+                    if not roll:
+                        continue
+                    student_rows.append(row)
+
+                processed_count = len(student_rows)
+                
+                # Fetch tokens for all students first
+                self.root.after(0, lambda: self.status_var.set("Fetching parent tokens from Firestore..."))
+                student_tokens_map = {}
+                for idx, row in enumerate(student_rows, start=1):
+                    roll = str(row.get("Roll_no", "")).strip()
+                    self.root.after(0, lambda r=roll, i=idx: self.status_var.set(f"Fetching tokens ({i}/{processed_count}): Roll No {r}"))
+                    tokens = get_parent_tokens(roll)
+                    if tokens:
+                        student_tokens_map[roll] = tokens
+                    else:
+                        no_token_count += 1
+
+                # Send notifications
+                self.root.after(0, lambda: self.status_var.set("Sending push notifications..."))
+                
+                # Prepare send tasks
+                send_tasks = []
+                for row in student_rows:
+                    roll = str(row.get("Roll_no", "")).strip()
+                    score = row.get("score", "N/A")
+                    tokens = student_tokens_map.get(roll, [])
+                    for t in tokens:
+                        send_tasks.append((t, roll, score))
+
+                total_sends = len(send_tasks)
+                if total_sends > 0:
+                    from concurrent.futures import ThreadPoolExecutor
+                    with ThreadPoolExecutor(max_workers=5) as executor:
+                        futures = {
+                            executor.submit(send_fcm, t, r, s): (t, r, s)
+                            for t, r, s in send_tasks
+                        }
+                        sent_so_far = 0
+                        for future in futures:
+                            t, r, s = futures[future]
+                            success = future.result()
+                            sent_so_far += 1
+                            self.root.after(0, lambda count=sent_so_far: self.status_var.set(f"Sent {count}/{total_sends} push notifications..."))
+                            if success:
+                                success_count += 1
+                            else:
+                                fail_count += 1
+                
+                def show_result():
+                    self.status_var.set("Ready")
+                    self.btn_push.config(state=NORMAL)
+                    self.btn_run.config(state=NORMAL)
+                    self.btn_input_pdf.config(state=NORMAL)
+                    self.btn_notify.config(state=NORMAL)
+                    
+                    summary_msg = (
+                        f"Notification sending complete.\n\n"
+                        f"- Total students processed: {processed_count}\n"
+                        f"- Students with registered devices: {processed_count - no_token_count}\n"
+                        f"- Students without registered devices: {no_token_count}\n"
+                        f"- Total successful pushes: {success_count}\n"
+                        f"- Total failed pushes: {fail_count}"
+                    )
+                    messagebox.showinfo("Push Notifications Sent", summary_msg)
+                
+                self.root.after(0, show_result)
+
+            except Exception as e:
+                def show_error(err=str(e)):
+                    self.status_var.set("Error")
+                    self.btn_push.config(state=NORMAL)
+                    self.btn_run.config(state=NORMAL)
+                    self.btn_input_pdf.config(state=NORMAL)
+                    self.btn_notify.config(state=NORMAL)
+                    messagebox.showerror("Error", f"Failed to send notifications: {err}")
+                self.root.after(0, show_error)
+
+        threading.Thread(target=run_notifications, daemon=True).start()
 
     # ---------- SETTINGS ----------
     def open_settings(self):
@@ -1211,6 +1456,7 @@ class TestManagerApp:
         templates_dir_var = StringVar(value=self.settings.get("templates_dir", raw=True))
         firestore_key_var = StringVar(value=self.settings.get("firestore_auth_key", raw=True))
         collection_var = StringVar(value=self.settings.get("firestore_collection", "test_results"))
+        parent_tokens_collection_var = StringVar(value=self.settings.get("parent_tokens_collection", "parent_tokens"))
 
         def browse_dir(var):
             path = filedialog.askdirectory()
@@ -1251,6 +1497,10 @@ class TestManagerApp:
         Entry(settings_win, textvariable=collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
         row += 1
 
+        Label(settings_win, text="Parent Tokens Collection:").grid(row=row, column=0, sticky=W, padx=5, pady=5)
+        Entry(settings_win, textvariable=parent_tokens_collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
+        row += 1
+
         def save_settings():
             self.settings.set("input_dir", input_dir_var.get())
             self.settings.set("output_dir", output_dir_var.get())
@@ -1258,6 +1508,7 @@ class TestManagerApp:
             self.settings.set("templates_dir", templates_dir_var.get())
             self.settings.set("firestore_auth_key", firestore_key_var.get())
             self.settings.set("firestore_collection", collection_var.get())
+            self.settings.set("parent_tokens_collection", parent_tokens_collection_var.get())
             messagebox.showinfo("Settings", "Settings saved.")
             settings_win.destroy()
 

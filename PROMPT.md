@@ -233,3 +233,16 @@ Allow the application to dynamically extract the answer key from the first page 
 ### Commit
 `8ee0a0a`
 
+---
+
+## Step 12: FCM Push Notifications for Parents
+
+### Goal
+Implement a one-click "Notify All Parents" button in the Python OMR software dashboard. When clicked, it should retrieve parent FCM device tokens from Firestore and send push notifications directly to all parents belonging to the selected test.
+
+### What We Did
+* **FCM Push Notification UI & Defaults**: Added a default configuration setting `parent_tokens_collection` (default: `parent_tokens`) and added a configurable "Parent Tokens Collection" field in the Preferences GUI window.
+* **GUI Button & Flow Controls**: Added a "Notify All Parents" action button next to "Push to Firestore" that is enabled when a test is selected and disabled during long-running tasks.
+* **Concurrent Push Service**: Implemented background thread orchestrator `notify_parents` that fetches parent device tokens from Google Firestore (supporting roll number matching by document ID or query fields) and sends push notifications using a `ThreadPoolExecutor` targeting the official FCM v1 REST API. It reports a complete transmission summary containing counts for success, failure, and missing device registrations.
+
+
