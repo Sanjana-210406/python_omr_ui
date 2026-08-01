@@ -100,7 +100,10 @@ class SettingsManager:
 
     def _deploy_bundled_samples(self):
         if getattr(sys, 'frozen', False):
-            user_samples_dir = os.path.expanduser("~/OMR_Test_Manager/samples")
+            base_dir = os.path.expanduser("~/OMR_Test_Manager")
+            os.makedirs(os.path.join(base_dir, "inputs"), exist_ok=True)
+            os.makedirs(os.path.join(base_dir, "outputs"), exist_ok=True)
+            user_samples_dir = os.path.join(base_dir, "samples")
             if not os.path.exists(user_samples_dir) or not os.listdir(user_samples_dir):
                 os.makedirs(user_samples_dir, exist_ok=True)
                 bundled_samples = os.path.join(sys._MEIPASS, "samples")
