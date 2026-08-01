@@ -137,9 +137,9 @@ class SettingsManager:
         if key in ["input_dir", "output_dir", "python_command", "templates_dir"]:
             platform_key = f"{key}_{sys.platform}"
             val = None
-            if platform_key in self.data:
+            if platform_key in self.data and self.data[platform_key]:
                 val = self.data[platform_key]
-            elif sys.platform == "win32" and key in self.data:
+            elif sys.platform == "win32" and key in self.data and self.data[key]:
                 val = self.data[key]
             else:
                 if getattr(sys, 'frozen', False):
