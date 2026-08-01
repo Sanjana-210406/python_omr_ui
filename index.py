@@ -82,11 +82,17 @@ class Database:
 class SettingsManager:
     def __init__(self, config_file=CONFIG_FILE):
         self.config_file = config_file
+        
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.expanduser("~/OMR_Test_Manager")
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            
         self.defaults = {
-            "input_dir": "",
-            "output_dir": "",
+            "input_dir": os.path.join(base_dir, "inputs"),
+            "output_dir": os.path.join(base_dir, "outputs"),
             "python_command": "python3 main.py --inputDir {input} --outputDir {output}",
-            "templates_dir": "",
+            "templates_dir": os.path.join(base_dir, "samples"),
             "firestore_auth_key": "",  # path to service account JSON
             "firestore_collection": "test_results",
             "parent_tokens_collection": "parent_tokens",
@@ -95,6 +101,21 @@ class SettingsManager:
             "pin_hash": self._hash_pin("123456")  # default PIN: 123456
         }
         self.data = self._load()
+        
+        # Ensure default directories are set if missing/empty in loaded config
+        updated = False
+        for key in ["input_dir", "output_dir", "templates_dir"]:
+            platform_key = f"{key}_{sys.platform}"
+            if platform_key not in self.data or not self.data[platform_key]:
+                if key in self.data and self.data[key]:
+                    pass
+                else:
+                    self.data[platform_key] = self.defaults[key]
+                    updated = True
+                    
+        if updated or not os.path.exists(self.config_file):
+            self.save()
+            
         self._deploy_bundled_samples()
         self.current_test_id = None
 
