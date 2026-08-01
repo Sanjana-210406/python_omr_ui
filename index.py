@@ -90,6 +90,8 @@ class SettingsManager:
             "firestore_auth_key": "",  # path to service account JSON
             "firestore_collection": "test_results",
             "parent_tokens_collection": "parent_tokens",
+            "students_collection": "students",
+            "parent_notifications_collection": "parent_notifications",
             "pin_hash": self._hash_pin("123456")  # default PIN: 123456
         }
         self.data = self._load()
@@ -1263,96 +1265,43 @@ class TestManagerApp:
                 if not rows:
                     raise Exception("CSV file is empty or invalid.")
 
-                # 3. Get Parent Collection setting
-                parent_tokens_col = self.settings.get("parent_tokens_collection", "parent_tokens")
+                # 3. Get Collection settings
+                students_col = self.settings.get("students_collection", "students")
+                parent_notifications_col = self.settings.get("parent_notifications_collection", "parent_notifications")
 
                 processed_count = 0
                 success_count = 0
                 fail_count = 0
-                no_token_count = 0
+                no_student_count = 0
 
-                # Define internal helpers for FCM
-                def get_parent_tokens(roll_no):
-                    tokens = []
+                # Define internal helper for student data lookup
+                def get_student_data(roll_no):
                     roll_no_str = str(roll_no).strip()
                     if not roll_no_str:
-                        return tokens
+                        return None
                     try:
                         # Direct doc ID check
-                        doc_ref = db.collection(parent_tokens_col).document(roll_no_str)
+                        doc_ref = db.collection(students_col).document(roll_no_str)
                         doc = doc_ref.get()
                         if doc.exists:
-                            tokens.extend(extract_tokens(doc.to_dict()))
+                            return doc.to_dict()
                         
                         # Query by fields
                         for field in ["roll_no", "rollNo", "rollNumber", "student_id"]:
-                            for doc_snap in db.collection(parent_tokens_col).where(field, "==", roll_no_str).stream():
-                                tokens.extend(extract_tokens(doc_snap.to_dict()))
+                            snaps = db.collection(students_col).where(field, "==", roll_no_str).limit(1).stream()
+                            for snap in snaps:
+                                return snap.to_dict()
 
                         # Numeric check
                         if roll_no_str.isdigit():
                             roll_no_int = int(roll_no_str)
                             for field in ["roll_no", "rollNo", "rollNumber", "student_id"]:
-                                for doc_snap in db.collection(parent_tokens_col).where(field, "==", roll_no_int).stream():
-                                    tokens.extend(extract_tokens(doc_snap.to_dict()))
+                                snaps = db.collection(students_col).where(field, "==", roll_no_int).limit(1).stream()
+                                for snap in snaps:
+                                    return snap.to_dict()
                     except Exception as e:
-                        print(f"Error getting tokens for Roll No {roll_no_str}: {e}")
-                    return list(set([t for t in tokens if t]))
-
-                def extract_tokens(data):
-                    extracted = []
-                    for key in ["fcm_token", "fcm_tokens", "token", "tokens", "device_token", "device_tokens", "registration_token", "registration_tokens"]:
-                        val = data.get(key)
-                        if isinstance(val, list):
-                            for item in val:
-                                if isinstance(item, str) and item.strip():
-                                    extracted.append(item.strip())
-                        elif isinstance(val, str) and val.strip():
-                            extracted.append(val.strip())
-                    return extracted
-
-                def send_fcm(token, roll_no, score):
-                    try:
-                        import google.auth.transport.requests
-                        import urllib.request
-                        import urllib.parse
-                        
-                        # Authorize FCM scope
-                        fcm_credentials = service_account.Credentials.from_service_account_file(
-                            auth_key_path,
-                            scopes=["https://www.googleapis.com/auth/firebase.messaging"]
-                        )
-                        request = google.auth.transport.requests.Request()
-                        fcm_credentials.refresh(request)
-                        access_token = fcm_credentials.token
-                        project_id = fcm_credentials.project_id
-
-                        url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
-                        
-                        title = f"OMR Test Result: {test_name}"
-                        body = f"Dear Parent, your child (Roll No: {roll_no}) scored {score} marks in the test '{test_name}'."
-                        
-                        payload = {
-                            "message": {
-                                "token": token,
-                                "notification": {
-                                    "title": title,
-                                    "body": body
-                                }
-                            }
-                        }
-                        
-                        data = json.dumps(payload).encode("utf-8")
-                        req = urllib.request.Request(url, data=data, method="POST")
-                        req.add_header("Authorization", f"Bearer {access_token}")
-                        req.add_header("Content-Type", "application/json; UTF-8")
-                        
-                        with urllib.request.urlopen(req, timeout=10) as response:
-                            response.read()
-                            return True
-                    except Exception as e:
-                        print(f"FCM Send Error for Roll No {roll_no}: {e}")
-                        return False
+                        print(f"Error querying student data for Roll No {roll_no_str}: {e}")
+                    return None
 
                 # Filter out key rows
                 student_rows = []
@@ -1366,50 +1315,52 @@ class TestManagerApp:
                     student_rows.append(row)
 
                 processed_count = len(student_rows)
-                
-                # Fetch tokens for all students first
-                self.root.after(0, lambda: self.status_var.set("Fetching parent tokens from Firestore..."))
-                student_tokens_map = {}
+                notifications_to_write = []
+
+                # Fetch student data for all students first
+                self.root.after(0, lambda: self.status_var.set("Fetching student data from Firestore..."))
                 for idx, row in enumerate(student_rows, start=1):
                     roll = str(row.get("Roll_no", "")).strip()
-                    self.root.after(0, lambda r=roll, i=idx: self.status_var.set(f"Fetching tokens ({i}/{processed_count}): Roll No {r}"))
-                    tokens = get_parent_tokens(roll)
-                    if tokens:
-                        student_tokens_map[roll] = tokens
-                    else:
-                        no_token_count += 1
-
-                # Send notifications
-                self.root.after(0, lambda: self.status_var.set("Sending push notifications..."))
-                
-                # Prepare send tasks
-                send_tasks = []
-                for row in student_rows:
-                    roll = str(row.get("Roll_no", "")).strip()
                     score = row.get("score", "N/A")
-                    tokens = student_tokens_map.get(roll, [])
-                    for t in tokens:
-                        send_tasks.append((t, roll, score))
+                    
+                    self.root.after(0, lambda r=roll, i=idx: self.status_var.set(f"Querying student ({i}/{processed_count}): Roll No {r}"))
+                    student_data = get_student_data(roll)
+                    
+                    if student_data:
+                        parent_phone = student_data.get("parent_phone") or student_data.get("phone") or student_data.get("parentPhone") or student_data.get("parent_number") or ""
+                        school = student_data.get("school") or student_data.get("school_name") or ""
+                        school_code = student_data.get("school_code") or student_data.get("schoolCode") or ""
+                        student_name = student_data.get("student_name") or student_data.get("name") or student_data.get("studentName") or ""
+                        
+                        notifications_to_write.append({
+                            "roll_no": roll,
+                            "student_name": student_name,
+                            "score": score,
+                            "parent_phone": parent_phone,
+                            "school": school,
+                            "school_code": school_code,
+                            "test_name": test_name,
+                            "test_date": test_date,
+                            "status": "pending",
+                            "timestamp": firestore.SERVER_TIMESTAMP
+                        })
+                        success_count += 1
+                    else:
+                        no_student_count += 1
 
-                total_sends = len(send_tasks)
-                if total_sends > 0:
-                    from concurrent.futures import ThreadPoolExecutor
-                    with ThreadPoolExecutor(max_workers=5) as executor:
-                        futures = {
-                            executor.submit(send_fcm, t, r, s): (t, r, s)
-                            for t, r, s in send_tasks
-                        }
-                        sent_so_far = 0
-                        for future in futures:
-                            t, r, s = futures[future]
-                            success = future.result()
-                            sent_so_far += 1
-                            self.root.after(0, lambda count=sent_so_far: self.status_var.set(f"Sent {count}/{total_sends} push notifications..."))
-                            if success:
-                                success_count += 1
-                            else:
-                                fail_count += 1
-                
+                # Write notifications in batch
+                if notifications_to_write:
+                    self.root.after(0, lambda: self.status_var.set("Writing parent notifications to Firestore..."))
+                    batch = db.batch()
+                    for i, notification_data in enumerate(notifications_to_write):
+                        doc_id = f"{self.current_test_id}_{notification_data['roll_no']}"
+                        doc_ref = db.collection(parent_notifications_col).document(doc_id)
+                        batch.set(doc_ref, notification_data, merge=True)
+                        if i % 500 == 499:
+                            batch.commit()
+                            batch = db.batch()
+                    batch.commit()
+
                 def show_result():
                     self.status_var.set("Ready")
                     self.btn_push.config(state=NORMAL)
@@ -1418,14 +1369,13 @@ class TestManagerApp:
                     self.btn_notify.config(state=NORMAL)
                     
                     summary_msg = (
-                        f"Notification sending complete.\n\n"
+                        f"Parent notifications queuing complete.\n\n"
                         f"- Total students processed: {processed_count}\n"
-                        f"- Students with registered devices: {processed_count - no_token_count}\n"
-                        f"- Students without registered devices: {no_token_count}\n"
-                        f"- Total successful pushes: {success_count}\n"
-                        f"- Total failed pushes: {fail_count}"
+                        f"- Found in students collection: {success_count}\n"
+                        f"- Not found in students collection: {no_student_count}\n"
+                        f"- Notifications queued in Firestore: {len(notifications_to_write)}"
                     )
-                    messagebox.showinfo("Push Notifications Sent", summary_msg)
+                    messagebox.showinfo("Notifications Queued", summary_msg)
                 
                 self.root.after(0, show_result)
 
@@ -1436,7 +1386,7 @@ class TestManagerApp:
                     self.btn_run.config(state=NORMAL)
                     self.btn_input_pdf.config(state=NORMAL)
                     self.btn_notify.config(state=NORMAL)
-                    messagebox.showerror("Error", f"Failed to send notifications: {err}")
+                    messagebox.showerror("Error", f"Failed to queue notifications: {err}")
                 self.root.after(0, show_error)
 
         threading.Thread(target=run_notifications, daemon=True).start()
@@ -1445,7 +1395,7 @@ class TestManagerApp:
     def open_settings(self):
         settings_win = Toplevel(self.root)
         settings_win.title("Settings")
-        settings_win.geometry("500x500")
+        settings_win.geometry("500x550")
         settings_win.transient(self.root)
         settings_win.grab_set()
 
@@ -1457,6 +1407,8 @@ class TestManagerApp:
         firestore_key_var = StringVar(value=self.settings.get("firestore_auth_key", raw=True))
         collection_var = StringVar(value=self.settings.get("firestore_collection", "test_results"))
         parent_tokens_collection_var = StringVar(value=self.settings.get("parent_tokens_collection", "parent_tokens"))
+        students_collection_var = StringVar(value=self.settings.get("students_collection", "students"))
+        parent_notifications_collection_var = StringVar(value=self.settings.get("parent_notifications_collection", "parent_notifications"))
 
         def browse_dir(var):
             path = filedialog.askdirectory()
@@ -1501,6 +1453,14 @@ class TestManagerApp:
         Entry(settings_win, textvariable=parent_tokens_collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
         row += 1
 
+        Label(settings_win, text="Students Collection:").grid(row=row, column=0, sticky=W, padx=5, pady=5)
+        Entry(settings_win, textvariable=students_collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
+        row += 1
+
+        Label(settings_win, text="Parent Notifications Col:").grid(row=row, column=0, sticky=W, padx=5, pady=5)
+        Entry(settings_win, textvariable=parent_notifications_collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
+        row += 1
+
         def save_settings():
             self.settings.set("input_dir", input_dir_var.get())
             self.settings.set("output_dir", output_dir_var.get())
@@ -1509,6 +1469,8 @@ class TestManagerApp:
             self.settings.set("firestore_auth_key", firestore_key_var.get())
             self.settings.set("firestore_collection", collection_var.get())
             self.settings.set("parent_tokens_collection", parent_tokens_collection_var.get())
+            self.settings.set("students_collection", students_collection_var.get())
+            self.settings.set("parent_notifications_collection", parent_notifications_collection_var.get())
             messagebox.showinfo("Settings", "Settings saved.")
             settings_win.destroy()
 
