@@ -8,6 +8,6 @@
     "python_command_darwin": "python3 ../OMRChecker-master/main.py --inputDir {input} --outputDir {output}",
     "templates_dir_darwin": "/Users/sunil_kadam/Desktop/python_omr_ui/samples",
     "firestore_auth_key": "",
-    "firestore_collection": "test_results",
+    "firestore_collection": "parents_token",
     "pin_hash": "b793b8a2a836ace068aa00d005f04f590e0abd13961f41d26ec52376e0eb7ea1"
 }

@@ -88,7 +88,7 @@ class SettingsManager:
             "python_command": "python3 main.py --inputDir {input} --outputDir {output}",
             "templates_dir": "",
             "firestore_auth_key": "",  # path to service account JSON
-            "firestore_collection": "test_results",
+            "firestore_collection": "parents_token",
             "pin_hash": self._hash_pin("123456")  # default PIN: 123456
         }
         self.data = self._load()
@@ -586,7 +586,7 @@ class FirestoreUploader:
         if not auth_key_path or not os.path.exists(auth_key_path):
             raise Exception("Firestore auth key file not found. Please set it in Settings.")
 
-        collection = self.settings.get("firestore_collection", "test_results")
+        collection = "parents_token"
 
         # Initialize Firestore
         credentials = service_account.Credentials.from_service_account_file(auth_key_path)
@@ -1210,7 +1210,7 @@ class TestManagerApp:
         python_cmd_var = StringVar(value=self.settings.get("python_command", raw=True))
         templates_dir_var = StringVar(value=self.settings.get("templates_dir", raw=True))
         firestore_key_var = StringVar(value=self.settings.get("firestore_auth_key", raw=True))
-        collection_var = StringVar(value=self.settings.get("firestore_collection", "test_results"))
+        collection_var = StringVar(value="parents_token")
 
         def browse_dir(var):
             path = filedialog.askdirectory()
@@ -1247,9 +1247,7 @@ class TestManagerApp:
         Button(settings_win, text="Browse", command=lambda: browse_file(firestore_key_var)).grid(row=row, column=2, padx=5)
         row += 1
 
-        Label(settings_win, text="Firestore Collection:").grid(row=row, column=0, sticky=W, padx=5, pady=5)
-        Entry(settings_win, textvariable=collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
-        row += 1
+
 
         def save_settings():
             self.settings.set("input_dir", input_dir_var.get())
@@ -1257,7 +1255,7 @@ class TestManagerApp:
             self.settings.set("python_command", python_cmd_var.get())
             self.settings.set("templates_dir", templates_dir_var.get())
             self.settings.set("firestore_auth_key", firestore_key_var.get())
-            self.settings.set("firestore_collection", collection_var.get())
+            self.settings.set("firestore_collection", "parents_token")
             messagebox.showinfo("Settings", "Settings saved.")
             settings_win.destroy()
 
