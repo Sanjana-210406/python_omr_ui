@@ -101,7 +101,6 @@ pip install Pillow pymupdf google-cloud-firestore opencv-python deepmerge dotmap
      * *Windows Example:* `py C:\OMRChecker-master\main.py --inputDir {input} --outputDir {output}`
      * *macOS Example:* `python3 /Users/yourusername/OMRChecker-master/main.py --inputDir {input} --outputDir {output}`
    * **Firestore Auth Key**: Browse and load the Google Cloud credentials JSON file provided by your technical team.
-   * **Firestore Collection**: Set the database collection name (default: `test_results`).
 5. Click **Save**.
 
 ---
