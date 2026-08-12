@@ -82,22 +82,49 @@ class Database:
 class SettingsManager:
     def __init__(self, config_file=CONFIG_FILE):
         self.config_file = config_file
+        
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.expanduser("~/OMR_Test_Manager")
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            
         self.defaults = {
-            "input_dir": "",
-            "output_dir": "",
+            "input_dir": os.path.join(base_dir, "inputs"),
+            "output_dir": os.path.join(base_dir, "outputs"),
             "python_command": "python3 main.py --inputDir {input} --outputDir {output}",
-            "templates_dir": "",
+            "templates_dir": os.path.join(base_dir, "samples"),
             "firestore_auth_key": "",  # path to service account JSON
             "firestore_collection": "parents_token",
+            "parent_tokens_collection": "parent_tokens",
+            "students_collection": "students",
+            "parent_notifications_collection": "parent_notifications",
             "pin_hash": self._hash_pin("123456")  # default PIN: 123456
         }
         self.data = self._load()
+        
+        # Ensure default directories are set if missing/empty in loaded config
+        updated = False
+        for key in ["input_dir", "output_dir", "templates_dir"]:
+            platform_key = f"{key}_{sys.platform}"
+            if platform_key not in self.data or not self.data[platform_key]:
+                if key in self.data and self.data[key]:
+                    pass
+                else:
+                    self.data[platform_key] = self.defaults[key]
+                    updated = True
+                    
+        if updated or not os.path.exists(self.config_file):
+            self.save()
+            
         self._deploy_bundled_samples()
         self.current_test_id = None
 
     def _deploy_bundled_samples(self):
         if getattr(sys, 'frozen', False):
-            user_samples_dir = os.path.expanduser("~/OMR_Test_Manager/samples")
+            base_dir = os.path.expanduser("~/OMR_Test_Manager")
+            os.makedirs(os.path.join(base_dir, "inputs"), exist_ok=True)
+            os.makedirs(os.path.join(base_dir, "outputs"), exist_ok=True)
+            user_samples_dir = os.path.join(base_dir, "samples")
             if not os.path.exists(user_samples_dir) or not os.listdir(user_samples_dir):
                 os.makedirs(user_samples_dir, exist_ok=True)
                 bundled_samples = os.path.join(sys._MEIPASS, "samples")
@@ -134,9 +161,9 @@ class SettingsManager:
         if key in ["input_dir", "output_dir", "python_command", "templates_dir"]:
             platform_key = f"{key}_{sys.platform}"
             val = None
-            if platform_key in self.data:
+            if platform_key in self.data and self.data[platform_key]:
                 val = self.data[platform_key]
-            elif sys.platform == "win32" and key in self.data:
+            elif sys.platform == "win32" and key in self.data and self.data[key]:
                 val = self.data[key]
             else:
                 if getattr(sys, 'frozen', False):
@@ -728,6 +755,9 @@ class TestManagerApp:
         self.btn_push = Button(action_frame, text="Push to Firestore", command=self.push_to_firestore, state=DISABLED)
         self.btn_push.pack(side=LEFT, padx=2)
 
+        self.btn_notify = Button(action_frame, text="Notify All Parents", command=self.notify_parents, state=DISABLED)
+        self.btn_notify.pack(side=LEFT, padx=2)
+
         # Output display area
         self.output_frame = LabelFrame(right_frame, text="CSV Output", padx=5, pady=5)
         self.output_frame.pack(fill=BOTH, expand=True, pady=5)
@@ -782,6 +812,7 @@ class TestManagerApp:
                 self.btn_input_pdf.config(state=NORMAL)
                 self.btn_run.config(state=NORMAL)
                 self.btn_push.config(state=NORMAL)
+                self.btn_notify.config(state=NORMAL)
                 # Clear output display
                 self.output_text.delete(1.0, END)
                 # Check if CSV exists in output dir and display it
@@ -794,6 +825,7 @@ class TestManagerApp:
             self.btn_input_pdf.config(state=DISABLED)
             self.btn_run.config(state=DISABLED)
             self.btn_push.config(state=DISABLED)
+            self.btn_notify.config(state=DISABLED)
 
     # ---------- CRUD DIALOGS ----------
     def add_test_dialog(self):
@@ -1005,6 +1037,7 @@ class TestManagerApp:
         self.btn_input_pdf.config(state=DISABLED)
         self.btn_run.config(state=DISABLED)
         self.btn_push.config(state=DISABLED)
+        self.btn_notify.config(state=DISABLED)
 
         def process():
             try:
@@ -1017,12 +1050,14 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
 
         threading.Thread(target=process, daemon=True).start()
 
@@ -1075,6 +1110,7 @@ class TestManagerApp:
         self.btn_run.config(state=DISABLED)
         self.btn_input_pdf.config(state=DISABLED)
         self.btn_push.config(state=DISABLED)
+        self.btn_notify.config(state=DISABLED)
 
         def run():
             try:
@@ -1087,12 +1123,14 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1179,6 +1217,9 @@ class TestManagerApp:
 
         self.status_var.set("Pushing to Firestore...")
         self.btn_push.config(state=DISABLED)
+        self.btn_run.config(state=DISABLED)
+        self.btn_input_pdf.config(state=DISABLED)
+        self.btn_notify.config(state=DISABLED)
 
         def upload():
             try:
@@ -1189,18 +1230,196 @@ class TestManagerApp:
                 self.root.after(0, lambda: messagebox.showinfo("Success", "Data pushed to Firestore."))
                 self.root.after(0, lambda: self.status_var.set("Ready"))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
 
         threading.Thread(target=upload, daemon=True).start()
+
+    # ---------- NOTIFY PARENTS (FCM PUSH NOTIFICATIONS) ----------
+    def notify_parents(self):
+        if not self.current_test_data:
+            return
+
+        test_name = self.current_test_data["name"]
+        test_date = self.current_test_data["date"]
+        
+        output_dir = self.settings.get("output_dir")
+        csv_files = self.processor.get_csv_files(output_dir)
+        # Exclude Option Analysis CSV from notification processing
+        csv_files = [f for f in csv_files if os.path.basename(f) != "Option_Analysis.csv"]
+        if not csv_files:
+            messagebox.showwarning("No CSV", "No CSV files found in output directory to notify parents. Please run grading first.")
+            return
+
+        # Use the latest CSV results file
+        csv_files.sort(key=os.path.getmtime, reverse=True)
+        csv_path = csv_files[0]
+        latest = os.path.basename(csv_path)
+
+        auth_key_path = self.settings.get("firestore_auth_key")
+        if not auth_key_path or not os.path.exists(auth_key_path):
+            messagebox.showerror("Error", "Firestore auth key file not found. Please set it in Settings.")
+            return
+
+        if not messagebox.askyesno("Notify Parents", f"Send push notifications to all parents for test '{test_name}' using '{latest}'?"):
+            return
+
+        self.status_var.set("Sending notifications...")
+        self.btn_push.config(state=DISABLED)
+        self.btn_run.config(state=DISABLED)
+        self.btn_input_pdf.config(state=DISABLED)
+        self.btn_notify.config(state=DISABLED)
+
+        def run_notifications():
+            try:
+                # 1. Initialize Firestore
+                credentials = service_account.Credentials.from_service_account_file(auth_key_path)
+                db = firestore.Client(credentials=credentials)
+
+                # 2. Read CSV
+                rows = self.processor.read_csv(csv_path)
+                if not rows:
+                    raise Exception("CSV file is empty or invalid.")
+
+                # 3. Get Collection settings
+                students_col = self.settings.get("students_collection", "students")
+                parent_notifications_col = self.settings.get("parent_notifications_collection", "parent_notifications")
+
+                processed_count = 0
+                success_count = 0
+                fail_count = 0
+                no_student_count = 0
+
+                # Define internal helper for student data lookup
+                def get_student_data(roll_no):
+                    roll_no_str = str(roll_no).strip()
+                    if not roll_no_str:
+                        return None
+                    try:
+                        # Direct doc ID check
+                        doc_ref = db.collection(students_col).document(roll_no_str)
+                        doc = doc_ref.get()
+                        if doc.exists:
+                            return doc.to_dict()
+                        
+                        # Query by fields
+                        for field in ["roll_no", "rollNo", "rollNumber", "student_id"]:
+                            snaps = db.collection(students_col).where(field, "==", roll_no_str).limit(1).stream()
+                            for snap in snaps:
+                                return snap.to_dict()
+
+                        # Numeric check
+                        if roll_no_str.isdigit():
+                            roll_no_int = int(roll_no_str)
+                            for field in ["roll_no", "rollNo", "rollNumber", "student_id"]:
+                                snaps = db.collection(students_col).where(field, "==", roll_no_int).limit(1).stream()
+                                for snap in snaps:
+                                    return snap.to_dict()
+                    except Exception as e:
+                        print(f"Error querying student data for Roll No {roll_no_str}: {e}")
+                    return None
+
+                # Filter out key rows
+                student_rows = []
+                for row in rows:
+                    roll = str(row.get("Roll_no", "")).strip()
+                    file_id = str(row.get("file_id", "")).strip()
+                    if roll.upper() == "KEY" or "key" in file_id.lower():
+                        continue
+                    if not roll:
+                        continue
+                    student_rows.append(row)
+
+                processed_count = len(student_rows)
+                notifications_to_write = []
+
+                # Fetch student data for all students first
+                self.root.after(0, lambda: self.status_var.set("Fetching student data from Firestore..."))
+                for idx, row in enumerate(student_rows, start=1):
+                    roll = str(row.get("Roll_no", "")).strip()
+                    score = row.get("score", "N/A")
+                    
+                    self.root.after(0, lambda r=roll, i=idx: self.status_var.set(f"Querying student ({i}/{processed_count}): Roll No {r}"))
+                    student_data = get_student_data(roll)
+                    
+                    if student_data:
+                        parent_phone = student_data.get("parent_phone") or student_data.get("phone") or student_data.get("parentPhone") or student_data.get("parent_number") or ""
+                        school = student_data.get("school") or student_data.get("school_name") or ""
+                        school_code = student_data.get("school_code") or student_data.get("schoolCode") or ""
+                        student_name = student_data.get("student_name") or student_data.get("name") or student_data.get("studentName") or ""
+                        
+                        notifications_to_write.append({
+                            "roll_no": roll,
+                            "student_name": student_name,
+                            "score": score,
+                            "parent_phone": parent_phone,
+                            "school": school,
+                            "school_code": school_code,
+                            "test_name": test_name,
+                            "test_date": test_date,
+                            "status": "pending",
+                            "timestamp": firestore.SERVER_TIMESTAMP
+                        })
+                        success_count += 1
+                    else:
+                        no_student_count += 1
+
+                # Write notifications in batch
+                if notifications_to_write:
+                    self.root.after(0, lambda: self.status_var.set("Writing parent notifications to Firestore..."))
+                    batch = db.batch()
+                    for i, notification_data in enumerate(notifications_to_write):
+                        doc_id = f"{self.current_test_id}_{notification_data['roll_no']}"
+                        doc_ref = db.collection(parent_notifications_col).document(doc_id)
+                        batch.set(doc_ref, notification_data, merge=True)
+                        if i % 500 == 499:
+                            batch.commit()
+                            batch = db.batch()
+                    batch.commit()
+
+                def show_result():
+                    self.status_var.set("Ready")
+                    self.btn_push.config(state=NORMAL)
+                    self.btn_run.config(state=NORMAL)
+                    self.btn_input_pdf.config(state=NORMAL)
+                    self.btn_notify.config(state=NORMAL)
+                    
+                    summary_msg = (
+                        f"Parent notifications queuing complete.\n\n"
+                        f"- Total students processed: {processed_count}\n"
+                        f"- Found in students collection: {success_count}\n"
+                        f"- Not found in students collection: {no_student_count}\n"
+                        f"- Notifications queued in Firestore: {len(notifications_to_write)}"
+                    )
+                    messagebox.showinfo("Notifications Queued", summary_msg)
+                
+                self.root.after(0, show_result)
+
+            except Exception as e:
+                def show_error(err=str(e)):
+                    self.status_var.set("Error")
+                    self.btn_push.config(state=NORMAL)
+                    self.btn_run.config(state=NORMAL)
+                    self.btn_input_pdf.config(state=NORMAL)
+                    self.btn_notify.config(state=NORMAL)
+                    messagebox.showerror("Error", f"Failed to queue notifications: {err}")
+                self.root.after(0, show_error)
+
+        threading.Thread(target=run_notifications, daemon=True).start()
 
     # ---------- SETTINGS ----------
     def open_settings(self):
         settings_win = Toplevel(self.root)
         settings_win.title("Settings")
-        settings_win.geometry("500x500")
+        settings_win.geometry("500x550")
         settings_win.transient(self.root)
         settings_win.grab_set()
 
@@ -1211,6 +1430,9 @@ class TestManagerApp:
         templates_dir_var = StringVar(value=self.settings.get("templates_dir", raw=True))
         firestore_key_var = StringVar(value=self.settings.get("firestore_auth_key", raw=True))
         collection_var = StringVar(value="parents_token")
+        parent_tokens_collection_var = StringVar(value=self.settings.get("parent_tokens_collection", "parent_tokens"))
+        students_collection_var = StringVar(value=self.settings.get("students_collection", "students"))
+        parent_notifications_collection_var = StringVar(value=self.settings.get("parent_notifications_collection", "parent_notifications"))
 
         def browse_dir(var):
             path = filedialog.askdirectory()
@@ -1249,6 +1471,18 @@ class TestManagerApp:
 
 
 
+        Label(settings_win, text="Parent Tokens Collection:").grid(row=row, column=0, sticky=W, padx=5, pady=5)
+        Entry(settings_win, textvariable=parent_tokens_collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
+        row += 1
+
+        Label(settings_win, text="Students Collection:").grid(row=row, column=0, sticky=W, padx=5, pady=5)
+        Entry(settings_win, textvariable=students_collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
+        row += 1
+
+        Label(settings_win, text="Parent Notifications Col:").grid(row=row, column=0, sticky=W, padx=5, pady=5)
+        Entry(settings_win, textvariable=parent_notifications_collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
+        row += 1
+
         def save_settings():
             self.settings.set("input_dir", input_dir_var.get())
             self.settings.set("output_dir", output_dir_var.get())
@@ -1256,6 +1490,9 @@ class TestManagerApp:
             self.settings.set("templates_dir", templates_dir_var.get())
             self.settings.set("firestore_auth_key", firestore_key_var.get())
             self.settings.set("firestore_collection", "parents_token")
+            self.settings.set("parent_tokens_collection", parent_tokens_collection_var.get())
+            self.settings.set("students_collection", students_collection_var.get())
+            self.settings.set("parent_notifications_collection", parent_notifications_collection_var.get())
             messagebox.showinfo("Settings", "Settings saved.")
             settings_win.destroy()
 
