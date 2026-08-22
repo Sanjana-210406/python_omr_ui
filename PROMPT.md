@@ -245,4 +245,15 @@ Implement a one-click "Notify All Parents" button in the Python OMR software das
 * **GUI Button & Flow Controls**: Added a "Notify All Parents" action button next to "Push to Firestore" that is enabled when a test is selected and disabled during long-running tasks.
 * **Concurrent Push Service**: Implemented background thread orchestrator `notify_parents` that fetches parent device tokens from Google Firestore (supporting roll number matching by document ID or query fields) and sends push notifications using a `ThreadPoolExecutor` targeting the official FCM v1 REST API. It reports a complete transmission summary containing counts for success, failure, and missing device registrations.
 
+---
+
+## Step 13: Auto-create Default Directories on Startup
+
+### Goal
+Resolve PDF upload and processing crashes caused by missing input/output base directories on fresh repository clones (since Git does not track empty folders).
+
+### What We Did
+* **Startup Directory Verification**: Added dynamic creation of default directories (inputs, outputs, templates) during settings initialization in `SettingsManager.__init__` of `index.py`.
+* **Clean PR Rebasing**: Resolved git branch conflicts by rebasing onto the latest upstream `origin/main` commit to produce a clean, ready-to-merge Pull Request.
+
 

@@ -190,6 +190,9 @@ This section details the historical developer steps, prompts, commits, and debug
 ## Step 12: FCM Push Notifications for Parents
 * **What We Did**: Added a one-click "Notify All Parents" button in the GUI and configured a new "Parent Tokens Collection" (default: `parent_tokens`) setting in Preferences. Implemented background execution logic that reads the latest OMR grading results, retrieves matching parent device registration tokens from Google Firestore (supporting lookups by document ID or fields matching student roll numbers), and pushes push notifications concurrently via the FCM v1 REST API.
 
+## Step 13: Auto-create Default Directories on Startup
+* **What We Did**: Implemented automatic creation of default input, output, and templates directories on startup inside `SettingsManager.__init__`. This prevents path validation exceptions and crashes when attempting to upload/process scanned PDFs on new clones or clean directory structures where empty directories are not tracked by Git.
+
 
 
 
