@@ -14,6 +14,8 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from google.cloud import firestore
 from google.oauth2 import service_account
 import fitz
+from PIL import Image, ImageTk
+
 
 
 # ========================== CONFIGURATION ==========================
@@ -117,6 +119,13 @@ class SettingsManager:
             self.save()
             
         self._deploy_bundled_samples()
+        
+        # Ensure default directories exist on startup
+        for key in ["input_dir", "output_dir", "templates_dir"]:
+            path = self.get(key, raw=True)
+            if path:
+                os.makedirs(path, exist_ok=True)
+
         self.current_test_id = None
 
     def _deploy_bundled_samples(self):
@@ -215,6 +224,38 @@ class PDFProcessor:
     def __init__(self, settings):
         self.settings = settings
 
+    def get_questions_in_order(self, input_dir):
+        template_path = os.path.join(input_dir, "template.json")
+        if not os.path.exists(template_path):
+            return []
+        try:
+            with open(template_path, 'r', encoding='utf-8') as f:
+                temp_data = json.load(f)
+            field_blocks = temp_data.get("fieldBlocks", {})
+            all_labels = []
+            for block in field_blocks.values():
+                all_labels.extend(block.get("fieldLabels", []))
+            
+            import re
+            questions = []
+            for label in all_labels:
+                range_match = re.match(r'^([qQ])(\d+)\.\.(\d+)$', label)
+                if range_match:
+                    prefix, start, end = range_match.groups()
+                    for i in range(int(start), int(end) + 1):
+                        questions.append(f"q{i}")
+                else:
+                    single_match = re.match(r'^([qQ])(\d+)$', label)
+                    if single_match:
+                        prefix, num = single_match.groups()
+                        questions.append(f"q{num}")
+            # Sort questions numerically (q1, q2... q50)
+            questions.sort(key=lambda x: int(x[1:]))
+            return questions
+        except Exception as e:
+            print(f"Error parsing template for questions_in_order: {e}")
+            return []
+
     def configure_answer_key(self, test_id, input_dir):
         base_input_dir = self.settings.get("input_dir", raw=True)
         
@@ -229,6 +270,60 @@ class PDFProcessor:
                 break
                 
         if not found_ext:
+            # Fallback: if no uploaded answer key is found, check if first page page_1.jpg exists in input_dir
+            first_page_path = os.path.join(input_dir, "page_1.jpg")
+            if os.path.exists(first_page_path):
+                dst_img_name = "answer_key.jpg"
+                dst_img_path = os.path.join(input_dir, dst_img_name)
+                try:
+                    shutil.copy2(first_page_path, dst_img_path)
+                    os.remove(first_page_path)
+                except Exception as e:
+                    print(f"Error copying first page as answer key: {e}")
+                    return
+
+                evaluation_json_path = os.path.join(input_dir, "evaluation.json")
+                if os.path.exists(evaluation_json_path):
+                    try:
+                        with open(evaluation_json_path, 'r') as f:
+                            data = json.load(f)
+                    except Exception as e:
+                        print(f"Error loading evaluation.json: {e}")
+                        data = {}
+                else:
+                    data = {}
+
+                data["source_type"] = "csv"
+                if "options" not in data:
+                    data["options"] = {}
+                data["options"]["answer_key_csv_path"] = "answer_key.csv"
+                data["options"]["answer_key_image_path"] = dst_img_name
+                data["options"]["questions_in_order"] = self.get_questions_in_order(input_dir)
+
+                # Make sure we don't have a stray answer_key.csv left over in the folder
+                stray_csv = os.path.join(input_dir, "answer_key.csv")
+                if os.path.exists(stray_csv):
+                    try:
+                        os.remove(stray_csv)
+                    except Exception as e:
+                        print(f"Error removing stray CSV: {e}")
+
+                if "marking_schemes" not in data:
+                    if "marking_scheme" in data:
+                        data["marking_schemes"] = data["marking_scheme"]
+                    else:
+                        data["marking_schemes"] = {
+                            "DEFAULT": {
+                                "correct": "1",
+                                "incorrect": "0",
+                                "unmarked": "0"
+                            }
+                        }
+                try:
+                    with open(evaluation_json_path, 'w') as f:
+                        json.dump(data, f, indent=4)
+                except Exception as e:
+                    print(f"Error writing evaluation.json: {e}")
             return
             
         # 1. If it's a JSON file, it replaces evaluation.json
@@ -309,6 +404,7 @@ class PDFProcessor:
                 data["options"] = {}
             data["options"]["answer_key_csv_path"] = "answer_key.csv"
             data["options"]["answer_key_image_path"] = dst_img_name
+            data["options"]["questions_in_order"] = self.get_questions_in_order(input_dir)
             
             # Make sure we don't have a stray answer_key.csv left over in the folder
             stray_csv = os.path.join(input_dir, "answer_key.csv")
@@ -319,13 +415,16 @@ class PDFProcessor:
                     print(f"Error removing stray CSV: {e}")
                     
             if "marking_schemes" not in data:
-                data["marking_schemes"] = {
-                    "DEFAULT": {
-                        "correct": "1",
-                        "incorrect": "0",
-                        "unmarked": "0"
+                if "marking_scheme" in data:
+                    data["marking_schemes"] = data["marking_scheme"]
+                else:
+                    data["marking_schemes"] = {
+                        "DEFAULT": {
+                            "correct": "1",
+                            "incorrect": "0",
+                            "unmarked": "0"
+                        }
                     }
-                }
             try:
                 with open(evaluation_json_path, 'w') as f:
                     json.dump(data, f, indent=4)
@@ -465,34 +564,13 @@ class PDFProcessor:
         if test_id is not None:
             self.configure_answer_key(test_id, input_dir)
 
-        cmd_template = self.settings.get("python_command") or ""
+        cmd_template = self.settings.get("python_command")
 
         input_dir = self.settings.get("input_dir")
         output_dir = self.settings.get("output_dir")
 
-        # Determine whether to use the built-in OMR engine or a shell command.
-        # The built-in engine runs the bundled OMRChecker (src.entry) IN-PROCESS. On Windows
-        # this is the robust path: it needs no external Python on PATH (so it avoids the
-        # "Python was not found" Microsoft Store alias trap), needs no separate main.py file,
-        # and can never re-launch this Test Manager GUI (which would pop a second login window).
-        cmd_lower = cmd_template.lower()
-        is_default_cmd = (
-            getattr(sys, 'frozen', False)
-            or "omrchecker" in cmd_lower
-            or "main.py" in cmd_lower       # OMRChecker's standard CLI entry (bundled here as src.entry)
-            or "src.entry" in cmd_lower
-            or "src/entry" in cmd_lower
-            or cmd_template.strip() == ""
-        )
-        # Safety net: never run this app's own GUI entry point (index.py) as a subprocess,
-        # otherwise Run Command opens a second Test Manager window and asks for the PIN again.
-        if "index.py" in cmd_lower:
-            if progress_callback:
-                progress_callback(
-                    "Configured command points at the Test Manager itself (index.py); "
-                    "running the built-in OMR engine instead."
-                )
-            is_default_cmd = True
+        # Determine if we should use the built-in OMRChecker or fallback to shell command
+        is_default_cmd = "OMRChecker" in cmd_template or getattr(sys, 'frozen', False)
 
         if is_default_cmd:
             if progress_callback:
@@ -628,29 +706,13 @@ class FirestoreUploader:
     def __init__(self, settings):
         self.settings = settings
 
-    def upload_csv(self, csv_path, test_data=None, progress_callback=None):
-        """Upload OMR results to the results collection, tagged with the test.
-
-        Each student row becomes one document in the OMR results collection
-        (``firestore_collection`` in Settings, e.g. "results" — the collection the
-        Parent App reads). Every document is stamped with the test it belongs to
-        (testId / testName / testDate) and a ``roll_no`` key so the Parent App can
-        match the result to a student (see omr_parent_app streamResultsForStudent()).
-
-        This method never writes to the parent-token collection.
-        """
+    def upload_csv(self, csv_path, progress_callback=None):
+        """Upload CSV data to Firestore collection."""
         auth_key_path = self.settings.get("firestore_auth_key")
         if not auth_key_path or not os.path.exists(auth_key_path):
             raise Exception("Firestore auth key file not found. Please set it in Settings.")
 
-        # OMR results collection that the Parent App reads.
-        collection = self.settings.get("firestore_collection", "results")
-
-        # Test metadata so every result is traceable back to its test.
-        test_data = test_data or {}
-        test_id = str(test_data.get("id", "")).strip()
-        test_name = str(test_data.get("name", "")).strip()
-        test_date = str(test_data.get("date", "")).strip()
+        collection = self.settings.get("firestore_collection", "parents_token")
 
         # Initialize Firestore
         credentials = service_account.Credentials.from_service_account_file(auth_key_path)
@@ -666,84 +728,19 @@ class FirestoreUploader:
         if not rows:
             raise Exception("CSV file is empty or invalid.")
 
-        def _is_key_row(r):
-            return (str(r.get("Roll_no", "")).strip().upper() == "KEY"
-                    or "key" in str(r.get("file_id", "")).lower())
-
-        def _question_cols(r):
-            # Question columns look like q1, q2, ... Q60 (letter 'q' + digits).
-            return [c for c in r.keys()
-                    if len(c) >= 2 and c[0] in ("q", "Q") and c[1:].isdigit()]
-
-        # Correct answers come from the answer-key row (page_1 / Roll_no == KEY),
-        # which the OMR engine graded against. Never re-score here — only compare.
-        answer_key = {}
-        for r in rows:
-            if _is_key_row(r):
-                for c in _question_cols(r):
-                    answer_key[c] = str(r.get(c, "")).strip()
-                break
-
-        # Upload each student row as one result document.
+        # Upload each row as a document
         batch = db.batch()
-        uploaded = 0
-        for row in rows:
-            roll_no = str(row.get("Roll_no", "")).strip()
-            file_id = str(row.get("file_id", "")).strip()
-
-            # Skip the answer-key row and blank roll numbers — they are not students.
-            if roll_no.upper() == "KEY" or "key" in file_id.lower() or not roll_no:
-                continue
-
-            # Preserve the OMR data; drop noisy absolute machine paths.
-            doc = {k: v for k, v in row.items() if k not in ("input_path", "output_path")}
-
-            # Attach test identity + student match key for the Parent App.
-            if test_id:
-                doc["testId"] = test_id
-            if test_name:
-                doc["testName"] = test_name
-            if test_date:
-                doc["testDate"] = test_date
-            doc["roll_no"] = roll_no  # Parent App matches results on roll_no / admissionNo
-
-            # Per-question review the Parent App can display directly: the student's
-            # actual selected answer (preserved, never turned into "R"), the correct
-            # answer from the key, and the status. Status is derived by comparison —
-            # the score itself is unchanged and still comes from the OMR engine.
-            question_review = {}
-            for c in _question_cols(row):
-                num = c[1:]  # "q7" -> "7"
-                selected = str(row.get(c, "")).strip()
-                correct = answer_key.get(c, "")
-                if selected == "":
-                    status = "unmarked"
-                elif correct != "" and selected == correct:
-                    status = "correct"
-                else:
-                    status = "wrong"
-                question_review[num] = {
-                    "selected": selected,
-                    "correct": correct,
-                    "status": status,
-                }
-            if question_review:
-                doc["questionReview"] = question_review
-
-            # Deterministic doc id "{testId}_{roll_no}" (matches getResult() in the Parent App)
-            # so re-pushing the same test overwrites rather than creating duplicate documents.
-            doc_id = f"{test_id}_{roll_no}" if test_id else None
-            doc_ref = (db.collection(collection).document(doc_id)
-                       if doc_id else db.collection(collection).document())
-            batch.set(doc_ref, doc)
-            uploaded += 1
-            if uploaded % 500 == 0:  # Firestore batch limit is 500
+        for i, row in enumerate(rows):
+            # Use auto-generated ID or use a field if available
+            doc_ref = db.collection(collection).document()
+            batch.set(doc_ref, row)
+            if i % 500 == 499:  # Firestore batch limit is 500
                 batch.commit()
                 batch = db.batch()
         batch.commit()
 
         if progress_callback:
-            progress_callback(f"Uploaded {uploaded} result(s) to Firestore collection '{collection}'.")
+            progress_callback(f"Uploaded {len(rows)} rows to Firestore collection '{collection}'.")
 
 
 # ========================== MAIN APPLICATION ==========================
@@ -860,6 +857,12 @@ class TestManagerApp:
         self.btn_notify = Button(action_frame, text="Notify All Parents", command=self.notify_parents, state=DISABLED)
         self.btn_notify.pack(side=LEFT, padx=2)
 
+        self.btn_export_csv = Button(action_frame, text="Export CSV", command=self.export_csv, state=DISABLED)
+        self.btn_export_csv.pack(side=LEFT, padx=2)
+
+        self.btn_verify = Button(action_frame, text="Verify CSV", command=self.verify_results, state=DISABLED)
+        self.btn_verify.pack(side=LEFT, padx=2)
+
         # Output display area
         self.output_frame = LabelFrame(right_frame, text="CSV Output", padx=5, pady=5)
         self.output_frame.pack(fill=BOTH, expand=True, pady=5)
@@ -915,6 +918,8 @@ class TestManagerApp:
                 self.btn_run.config(state=NORMAL)
                 self.btn_push.config(state=NORMAL)
                 self.btn_notify.config(state=NORMAL)
+                self.btn_export_csv.config(state=NORMAL)
+                self.btn_verify.config(state=NORMAL)
                 # Clear output display
                 self.output_text.delete(1.0, END)
                 # Check if CSV exists in output dir and display it
@@ -928,6 +933,8 @@ class TestManagerApp:
             self.btn_run.config(state=DISABLED)
             self.btn_push.config(state=DISABLED)
             self.btn_notify.config(state=DISABLED)
+            self.btn_export_csv.config(state=DISABLED)
+            self.btn_verify.config(state=DISABLED)
 
     # ---------- CRUD DIALOGS ----------
     def add_test_dialog(self):
@@ -1140,6 +1147,8 @@ class TestManagerApp:
         self.btn_run.config(state=DISABLED)
         self.btn_push.config(state=DISABLED)
         self.btn_notify.config(state=DISABLED)
+        self.btn_export_csv.config(state=DISABLED)
+        self.btn_verify.config(state=DISABLED)
 
         def process():
             try:
@@ -1153,6 +1162,8 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
@@ -1160,6 +1171,8 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
 
         threading.Thread(target=process, daemon=True).start()
 
@@ -1213,6 +1226,8 @@ class TestManagerApp:
         self.btn_input_pdf.config(state=DISABLED)
         self.btn_push.config(state=DISABLED)
         self.btn_notify.config(state=DISABLED)
+        self.btn_export_csv.config(state=DISABLED)
+        self.btn_verify.config(state=DISABLED)
 
         def run():
             try:
@@ -1226,6 +1241,8 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
@@ -1233,6 +1250,8 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1322,19 +1341,23 @@ class TestManagerApp:
         self.btn_run.config(state=DISABLED)
         self.btn_input_pdf.config(state=DISABLED)
         self.btn_notify.config(state=DISABLED)
+        self.btn_export_csv.config(state=DISABLED)
+        self.btn_verify.config(state=DISABLED)
 
         def upload():
             try:
                 uploader = FirestoreUploader(self.settings)
                 def progress(msg):
                     self.root.after(0, lambda: self.status_var.set(msg))
-                uploader.upload_csv(csv_path, test_data=self.current_test_data, progress_callback=progress)
+                uploader.upload_csv(csv_path, progress_callback=progress)
                 self.root.after(0, lambda: messagebox.showinfo("Success", "Data pushed to Firestore."))
                 self.root.after(0, lambda: self.status_var.set("Ready"))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
@@ -1342,6 +1365,8 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
 
         threading.Thread(target=upload, daemon=True).start()
 
@@ -1379,212 +1404,115 @@ class TestManagerApp:
         self.btn_run.config(state=DISABLED)
         self.btn_input_pdf.config(state=DISABLED)
         self.btn_notify.config(state=DISABLED)
+        self.btn_export_csv.config(state=DISABLED)
+        self.btn_verify.config(state=DISABLED)
 
         def run_notifications():
             try:
-                # 1. Firestore (reads/writes) + Firebase Admin (FCM send).
+                # 1. Initialize Firestore
                 credentials = service_account.Credentials.from_service_account_file(auth_key_path)
                 db = firestore.Client(credentials=credentials)
 
-                try:
-                    import firebase_admin
-                    from firebase_admin import credentials as fb_credentials, messaging
-                except ImportError:
-                    raise Exception(
-                        "The 'firebase-admin' package is required to send push notifications.\n"
-                        "Install it with:\n    py -m pip install firebase-admin"
-                    )
-                # Initialize the Admin app once per process (reuse if already initialized).
-                try:
-                    firebase_admin.get_app()
-                except ValueError:
-                    firebase_admin.initialize_app(fb_credentials.Certificate(auth_key_path))
-
-                # 2. Read the graded CSV for this test.
+                # 2. Read CSV
                 rows = self.processor.read_csv(csv_path)
                 if not rows:
                     raise Exception("CSV file is empty or invalid.")
 
-                # 3. Collections. Parent FCM tokens live at parents_token/{uid}.fcmToken,
-                #    written by the Parent App's FcmService (saveParentToken).
+                # 3. Get Collection settings
                 students_col = self.settings.get("students_collection", "students")
                 parent_notifications_col = self.settings.get("parent_notifications_collection", "parent_notifications")
-                parents_token_col = "parents_token"
-                # Parent App's published-report collection (created by the external
-                # publish/n8n pipeline, NOT by the Test Manager). Used only to decide
-                # whether a one-tap deep-link is available for a given student.
-                reports_col = "studentReports"
-                test_id = str(self.current_test_id)
 
-                # ---- helpers ----
-                def mask_token(t):
-                    # Never log a full FCM token.
-                    t = str(t or "")
-                    return f"{t[:6]}...{t[-3:]}" if len(t) > 10 else (t or "EMPTY")
+                processed_count = 0
+                success_count = 0
+                fail_count = 0
+                no_student_count = 0
 
-                def find_student(roll_no):
-                    """Return (student_dict, student_doc_id) for an OMR roll number.
-                    admissionNo is the Parent App's primary key (see claimStudent /
-                    streamResultsForStudent); rollNo and doc-id are fallbacks.
-
-                    A student can have DUPLICATE documents for the same admissionNo
-                    (e.g. one per section), and typically only ONE copy is claimed by a
-                    parent. So collect all matches for a field and prefer the doc that
-                    actually has parentIds/parentUids — otherwise the notify chain reads
-                    an unclaimed duplicate and wrongly reports "no parent"."""
-                    roll = str(roll_no).strip()
-                    if not roll:
-                        return None, None
+                # Define internal helper for student data lookup
+                def get_student_data(roll_no):
+                    roll_no_str = str(roll_no).strip()
+                    if not roll_no_str:
+                        return None
                     try:
-                        for field in ["admissionNo", "rollNo", "roll_no", "rollNumber"]:
-                            values = [roll, int(roll)] if roll.isdigit() else [roll]
-                            matches = []
-                            for val in values:
-                                for snap in db.collection(students_col).where(field, "==", val).stream():
-                                    matches.append((snap.to_dict(), snap.id))
-                            if matches:
-                                for sd, sid in matches:
-                                    if sd.get("parentIds") or sd.get("parentUids"):
-                                        return sd, sid
-                                return matches[0]
-                        doc = db.collection(students_col).document(roll).get()
+                        # Direct doc ID check
+                        doc_ref = db.collection(students_col).document(roll_no_str)
+                        doc = doc_ref.get()
                         if doc.exists:
-                            return doc.to_dict(), doc.id
-                    except Exception as e:
-                        print(f"Error querying student for Roll No {roll}: {e}")
-                    return None, None
+                            return doc.to_dict()
+                        
+                        # Query by fields
+                        for field in ["roll_no", "rollNo", "rollNumber", "student_id"]:
+                            snaps = db.collection(students_col).where(field, "==", roll_no_str).limit(1).stream()
+                            for snap in snaps:
+                                return snap.to_dict()
 
-                def token_for_uid(uid):
-                    # Parent's FCM token comes from parents_token/{uid} (Parent App).
-                    try:
-                        tdoc = db.collection(parents_token_col).document(str(uid)).get()
-                        if tdoc.exists:
-                            return (tdoc.to_dict() or {}).get("fcmToken") or ""
+                        # Numeric check
+                        if roll_no_str.isdigit():
+                            roll_no_int = int(roll_no_str)
+                            for field in ["roll_no", "rollNo", "rollNumber", "student_id"]:
+                                snaps = db.collection(students_col).where(field, "==", roll_no_int).limit(1).stream()
+                                for snap in snaps:
+                                    return snap.to_dict()
                     except Exception as e:
-                        print(f"Error reading token for uid {uid}: {e}")
-                    return ""
+                        print(f"Error querying student data for Roll No {roll_no_str}: {e}")
+                    return None
 
-                # 4. Students graded for this test (skip the answer-key / blank rows).
+                # Filter out key rows
                 student_rows = []
                 for row in rows:
                     roll = str(row.get("Roll_no", "")).strip()
                     file_id = str(row.get("file_id", "")).strip()
-                    if roll.upper() == "KEY" or "key" in file_id.lower() or not roll:
+                    if roll.upper() == "KEY" or "key" in file_id.lower():
+                        continue
+                    if not roll:
                         continue
                     student_rows.append(row)
 
                 processed_count = len(student_rows)
-                success_count = 0      # parents actually sent a push
-                sent_tokens = 0        # total push messages delivered
-                skipped_count = 0      # parents already notified for this test (dedup)
-                no_student_count = 0   # roll not found in students
-                no_parent_count = 0    # student found but no claimed parent
-                no_token_count = 0     # student has a parent, but no parents_token/fcmToken
+                notifications_to_write = []
 
-                notif_title = "Test Results Published"
-                notif_body = (
-                    f'The results for "{test_name}" have been published. '
-                    f"Please view the results in the Parent App."
-                )
-
-                # ---- Phase A: resolve every graded student to its parent(s) + token.
-                # Group by PARENT UID so a parent with several students in this test is
-                # notified once, not once per student.
-                #   parents[uid] = {"token": str, "rolls": [..], "school_code": str}
-                parents = {}
+                # Fetch student data for all students first
+                self.root.after(0, lambda: self.status_var.set("Fetching student data from Firestore..."))
                 for idx, row in enumerate(student_rows, start=1):
                     roll = str(row.get("Roll_no", "")).strip()
-                    self.root.after(0, lambda r=roll, i=idx: self.status_var.set(
-                        f"Resolving ({i}/{processed_count}): Roll No {r}"))
-
-                    student, student_doc_id = find_student(roll)
-                    print(f"[Notify] Roll {roll} | Student: "
-                          f"{'FOUND (' + str(student_doc_id) + ')' if student else 'NO'}")
-                    if not student:
-                        no_student_count += 1
-                        continue
-
-                    school_code = student.get("schoolCode") or student.get("school_code") or ""
-                    parent_uids = list(student.get("parentIds") or student.get("parentUids") or [])
-                    print(f"[Notify] Roll {roll} | Parent UID: {parent_uids[0] if parent_uids else 'NONE'}")
-                    if not parent_uids:
-                        no_parent_count += 1
-                        continue
-
-                    matched = False
-                    for uid in parent_uids:
-                        tdoc = db.collection(parents_token_col).document(str(uid)).get()
-                        tok = (tdoc.to_dict() or {}).get("fcmToken", "") if tdoc.exists else ""
-                        print(f"[Notify] Roll {roll} | parents_token[{str(uid)[:10]}..]: "
-                              f"{'FOUND' if tdoc.exists else 'NOT FOUND'} | "
-                              f"FCM token: {mask_token(tok) if tok else 'EMPTY'}")
-                        if tok:
-                            entry = parents.setdefault(
-                                uid, {"token": tok, "rolls": [], "school_code": school_code})
-                            entry["rolls"].append(roll)
-                            matched = True
-                    if not matched:
-                        no_token_count += 1
-
-                # ---- Phase B: one high-priority system notification per parent.
-                parents_with_students = len(parents)
-                print(f"[Notify] Parents with matching students: {parents_with_students} | "
-                      f"valid FCM tokens: {parents_with_students}")
-                for uid, info in parents.items():
-                    first_roll = info["rolls"][0]
-                    self.root.after(0, lambda u=uid: self.status_var.set(
-                        f"Notifying parent {u[:8]}.."))
-
-                    # Per-PARENT dedup key so re-clicking Notify doesn't double-send.
-                    notif_id = f"{test_id}_{uid}"
-                    notif_ref = db.collection(parent_notifications_col).document(notif_id)
-                    existing = notif_ref.get()
-                    if existing.exists and (existing.to_dict() or {}).get("status") == "sent":
-                        print(f"[Notify] Parent {uid[:10]}.. | already notified for test {test_id} — skipped")
-                        skipped_count += 1
-                        continue
-
-                    # Tap opens results/{testId}_{roll_no} in the Parent App (first student).
-                    data_payload = {
-                        "type": "result_published",
-                        "testId": test_id,
-                        "testName": str(test_name),
-                        "schoolCode": str(info["school_code"]),
-                        "roll_no": first_roll,
-                    }
-                    try:
-                        msg_id = messaging.send(messaging.Message(
-                            token=info["token"],
-                            notification=messaging.Notification(title=notif_title, body=notif_body),
-                            data=data_payload,
-                            # Route to the Parent App's "test_results" channel and deliver
-                            # as a high-priority heads-up system notification.
-                            android=messaging.AndroidConfig(
-                                priority="high",
-                                notification=messaging.AndroidNotification(
-                                    channel_id="test_results",
-                                    title=notif_title,
-                                    body=notif_body,
-                                ),
-                            ),
-                        ))
-                        print(f"[Notify] Parent {uid[:10]}.. | rolls={info['rolls']} | "
-                              f"FCM send: SUCCESS | msgId={msg_id}")
+                    score = row.get("score", "N/A")
+                    
+                    self.root.after(0, lambda r=roll, i=idx: self.status_var.set(f"Querying student ({i}/{processed_count}): Roll No {r}"))
+                    student_data = get_student_data(roll)
+                    
+                    if student_data:
+                        parent_phone = student_data.get("parent_phone") or student_data.get("phone") or student_data.get("parentPhone") or student_data.get("parent_number") or ""
+                        school = student_data.get("school") or student_data.get("school_name") or ""
+                        school_code = student_data.get("school_code") or student_data.get("schoolCode") or ""
+                        student_name = student_data.get("student_name") or student_data.get("name") or student_data.get("studentName") or ""
+                        
+                        notifications_to_write.append({
+                            "roll_no": roll,
+                            "student_name": student_name,
+                            "score": score,
+                            "parent_phone": parent_phone,
+                            "school": school,
+                            "school_code": school_code,
+                            "test_name": test_name,
+                            "test_date": test_date,
+                            "status": "pending",
+                            "timestamp": firestore.SERVER_TIMESTAMP
+                        })
                         success_count += 1
-                        sent_tokens += 1
-                        notif_ref.set({
-                            "parentUid": uid, "rolls": info["rolls"], "testId": test_id,
-                            "testName": test_name, "testDate": test_date,
-                            "schoolCode": info["school_code"], "tokensNotified": 1,
-                            "status": "sent", "timestamp": firestore.SERVER_TIMESTAMP,
-                        }, merge=True)
-                    except Exception as e:
-                        print(f"[Notify] Parent {uid[:10]}.. | FCM send: FAILED | {e}")
-                        notif_ref.set({
-                            "parentUid": uid, "rolls": info["rolls"], "testId": test_id,
-                            "testName": test_name, "status": "failed", "error": str(e),
-                            "timestamp": firestore.SERVER_TIMESTAMP,
-                        }, merge=True)
+                    else:
+                        no_student_count += 1
+
+                # Write notifications in batch
+                if notifications_to_write:
+                    self.root.after(0, lambda: self.status_var.set("Writing parent notifications to Firestore..."))
+                    batch = db.batch()
+                    for i, notification_data in enumerate(notifications_to_write):
+                        doc_id = f"{self.current_test_id}_{notification_data['roll_no']}"
+                        doc_ref = db.collection(parent_notifications_col).document(doc_id)
+                        batch.set(doc_ref, notification_data, merge=True)
+                        if i % 500 == 499:
+                            batch.commit()
+                            batch = db.batch()
+                    batch.commit()
 
                 def show_result():
                     self.status_var.set("Ready")
@@ -1592,20 +1520,18 @@ class TestManagerApp:
                     self.btn_run.config(state=NORMAL)
                     self.btn_input_pdf.config(state=NORMAL)
                     self.btn_notify.config(state=NORMAL)
-
+                    self.btn_export_csv.config(state=NORMAL)
+                    self.btn_verify.config(state=NORMAL)
+                    
                     summary_msg = (
-                        f"Parent notifications for '{test_name}' complete.\n\n"
-                        f"- Students processed: {processed_count}\n"
-                        f"- Parents with matching students: {parents_with_students}\n"
-                        f"- Parents notified (push sent): {success_count}\n"
-                        f"- Push messages delivered: {sent_tokens}\n"
-                        f"- Already notified (skipped): {skipped_count}\n"
-                        f"- Student not found: {no_student_count}\n"
-                        f"- No claimed parent: {no_parent_count}\n"
-                        f"- Parent has no FCM token: {no_token_count}"
+                        f"Parent notifications queuing complete.\n\n"
+                        f"- Total students processed: {processed_count}\n"
+                        f"- Found in students collection: {success_count}\n"
+                        f"- Not found in students collection: {no_student_count}\n"
+                        f"- Notifications queued in Firestore: {len(notifications_to_write)}"
                     )
-                    messagebox.showinfo("Notifications Sent", summary_msg)
-
+                    messagebox.showinfo("Notifications Queued", summary_msg)
+                
                 self.root.after(0, show_result)
 
             except Exception as e:
@@ -1615,16 +1541,366 @@ class TestManagerApp:
                     self.btn_run.config(state=NORMAL)
                     self.btn_input_pdf.config(state=NORMAL)
                     self.btn_notify.config(state=NORMAL)
+                    self.btn_export_csv.config(state=NORMAL)
+                    self.btn_verify.config(state=NORMAL)
                     messagebox.showerror("Error", f"Failed to queue notifications: {err}")
                 self.root.after(0, show_error)
 
         threading.Thread(target=run_notifications, daemon=True).start()
 
+    # ---------- EXPORT CSV ----------
+    def export_csv(self):
+        if not self.current_test_data:
+            return
+
+        output_dir = self.settings.get("output_dir")
+        csv_files = self.processor.get_csv_files(output_dir)
+        csv_files = [f for f in csv_files if os.path.basename(f) != "Option_Analysis.csv"]
+
+        if not csv_files:
+            messagebox.showwarning("No CSV", "No graded CSV files found to export. Please run grading first.")
+            return
+
+        # Use the latest CSV results file
+        csv_files.sort(key=os.path.getmtime, reverse=True)
+        src_csv_path = csv_files[0]
+
+        test_name = self.current_test_data.get("name", "test")
+        safe_test_name = "".join(c if c.isalnum() or c in (' ', '_', '-') else '_' for c in test_name)
+        safe_test_name = safe_test_name.replace(" ", "_")
+
+        # Ask user where to save
+        save_path = filedialog.asksaveasfilename(
+            title="Export CSV",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialfile=f"student_responses_{safe_test_name}.csv"
+        )
+        if not save_path:
+            return
+
+        try:
+            with open(src_csv_path, mode='r', newline='', encoding='utf-8') as infile:
+                reader = csv.DictReader(infile)
+                fieldnames = reader.fieldnames or []
+                
+                # Identify and sort question columns (e.g. q1, q2... q60)
+                q_headers = [h for h in fieldnames if h.lower().startswith("q") and h[1:].isdigit()]
+                q_headers.sort(key=lambda x: int(x[1:]))
+
+                out_headers = ["Roll"] + q_headers
+
+                rows_to_write = []
+                for row in reader:
+                    # Filter out answer key rows
+                    roll_val = ""
+                    for key_name in ["Roll_no", "roll_no", "Roll", "roll"]:
+                        if key_name in row:
+                            roll_val = row[key_name].strip()
+                            break
+                    
+                    file_id_val = row.get("file_id", "").strip()
+                    if roll_val.upper() == "KEY" or file_id_val == "Answer Key":
+                        continue
+                    if not roll_val:
+                        continue
+                    
+                    new_row = {"Roll": roll_val}
+                    for q in q_headers:
+                        new_row[q] = row.get(q, "")
+                    rows_to_write.append(new_row)
+
+            with open(save_path, mode='w', newline='', encoding='utf-8') as outfile:
+                writer = csv.DictWriter(outfile, fieldnames=out_headers)
+                writer.writeheader()
+                writer.writerows(rows_to_write)
+
+            messagebox.showinfo("Success", f"CSV exported successfully to:\n{save_path}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export CSV: {e}")
+
+    # ---------- VERIFY RESULTS ----------
+    def verify_results(self):
+        if not self.current_test_data:
+            return
+
+        output_dir = self.settings.get("output_dir")
+        checked_omr_dir = os.path.join(output_dir, "CheckedOMRs")
+        csv_files = self.processor.get_csv_files(output_dir)
+        csv_files = [f for f in csv_files if os.path.basename(f) != "Option_Analysis.csv"]
+
+        if not os.path.exists(checked_omr_dir) or not csv_files:
+            messagebox.showwarning("No Data", "No checked OMR images or CSV results found. Please run OMR grading first.")
+            return
+
+        # Find latest CSV
+        csv_files.sort(key=os.path.getmtime, reverse=True)
+        csv_path = csv_files[0]
+
+        # Load CSV data
+        csv_rows = []
+        try:
+            with open(csv_path, mode='r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                fieldnames = reader.fieldnames or []
+                for row in reader:
+                    csv_rows.append(row)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to read results CSV: {e}")
+            return
+
+        # Find Answer Key row and Question Headers
+        answer_key = {}
+        q_headers = []
+        for row in csv_rows:
+            roll_val = ""
+            for key_name in ["Roll_no", "roll_no", "Roll", "roll"]:
+                if key_name in row:
+                    roll_val = row[key_name].strip()
+                    break
+            file_id_val = row.get("file_id", "").strip()
+            if roll_val.upper() == "KEY" or file_id_val == "Answer Key":
+                answer_key = row
+                break
+
+        # If we have rows, extract question headers from the first row keys
+        if csv_rows:
+            q_headers = [h for h in csv_rows[0].keys() if h.lower().startswith("q") and h[1:].isdigit()]
+            q_headers.sort(key=lambda x: int(x[1:]))
+
+        # Index CSV data by file_id
+        csv_data = {}
+        for row in csv_rows:
+            file_id_val = row.get("file_id", "").strip()
+            if file_id_val:
+                csv_data[file_id_val] = row
+
+        # Get list of checked OMR images
+        try:
+            images = [f for f in os.listdir(checked_omr_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+            # Sort them numerically
+            def image_key(filename):
+                digits = "".join([c for c in filename if c.isdigit()])
+                return int(digits) if digits else 0
+            images.sort(key=image_key)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to scan CheckedOMRs directory: {e}")
+            return
+
+        if not images:
+            messagebox.showwarning("No Images", "No graded OMR images found in CheckedOMRs directory.")
+            return
+
+        # Create Window
+        verify_win = Toplevel(self.root)
+        verify_win.title(f"Verify OMR Results - {self.current_test_data['name']}")
+        verify_win.geometry("1000x750")
+        verify_win.transient(self.root)
+        verify_win.grab_set()
+
+        # Current page index tracker
+        current_index = 0
+
+        # Top Control Frame
+        top_frame = Frame(verify_win, padx=10, pady=10)
+        top_frame.pack(fill=X)
+
+        btn_prev = Button(top_frame, text="◀ Previous", width=12)
+        btn_prev.pack(side=LEFT, padx=5)
+
+        page_label = Label(top_frame, text="Page 1 of 1", font=("Arial", 12))
+        page_label.pack(side=LEFT, padx=10)
+
+        btn_next = Button(top_frame, text="Next ▶", width=12)
+        btn_next.pack(side=LEFT, padx=5)
+
+        # Dropdown Search
+        Label(top_frame, text="  Jump to:", font=("Arial", 12)).pack(side=LEFT)
+        
+        # Populate dropdown options
+        roll_to_index = {}
+        dropdown_options = []
+        for idx, img_name in enumerate(images):
+            row = csv_data.get(img_name, {})
+            roll = ""
+            for k in ["Roll_no", "roll_no", "Roll", "roll"]:
+                if k in row:
+                    roll = row[k].strip()
+                    break
+            if roll:
+                label_text = f"Roll {roll} ({img_name})"
+            else:
+                label_text = f"Unknown ({img_name})"
+            roll_to_index[label_text] = idx
+            dropdown_options.append(label_text)
+
+        combobox = ttk.Combobox(top_frame, values=dropdown_options, state="readonly", width=25)
+        combobox.pack(side=LEFT, padx=5)
+        if dropdown_options:
+            combobox.current(0)
+
+        # Main Split Area
+        main_frame = Frame(verify_win, padx=10, pady=5)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        # Left image panel
+        left_panel = LabelFrame(main_frame, text="Graded OMR Sheet", padx=5, pady=5)
+        left_panel.pack(side=LEFT, fill=BOTH, expand=True)
+
+        image_label = Label(left_panel, text="Loading Image...")
+        image_label.pack(fill=BOTH, expand=True)
+
+        # Right details panel
+        right_panel = LabelFrame(main_frame, text="Parsed Student Data", width=350, padx=10, pady=5)
+        right_panel.pack(side=RIGHT, fill=BOTH)
+        right_panel.pack_propagate(False)
+
+        # Student Summary Headers
+        info_frame = Frame(right_panel, pady=5)
+        info_frame.pack(fill=X)
+
+        roll_header = Label(info_frame, text="Roll Number: N/A", font=("Arial", 13, "bold"), anchor=W)
+        roll_header.pack(fill=X, pady=2)
+
+        score_header = Label(info_frame, text="OMR Score: N/A", font=("Arial", 13, "bold"), fg="blue", anchor=W)
+        score_header.pack(fill=X, pady=2)
+
+        # Treeview Comparison Table
+        table_frame = Frame(right_panel)
+        table_frame.pack(fill=BOTH, expand=True, pady=5)
+
+        columns = ("question", "student_ans", "correct_ans", "status")
+        tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
+        tree.heading("question", text="Q#")
+        tree.heading("student_ans", text="Opted")
+        tree.heading("correct_ans", text="Correct")
+        tree.heading("status", text="Status")
+
+        tree.column("question", width=50, anchor=CENTER)
+        tree.column("student_ans", width=70, anchor=CENTER)
+        tree.column("correct_ans", width=70, anchor=CENTER)
+        tree.column("status", width=130, anchor=W)
+
+        # Scrollbar for tree
+        scrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        
+        tree.pack(side=LEFT, fill=BOTH, expand=True)
+        scrollbar.pack(side=RIGHT, fill=Y)
+
+        # Tree Tags for formatting
+        tree.tag_configure("correct", foreground="green")
+        tree.tag_configure("incorrect", foreground="red")
+        tree.tag_configure("unmarked", foreground="gray")
+
+        # Page update function
+        def update_page():
+            nonlocal current_index
+            if not images:
+                return
+
+            filename = images[current_index]
+            image_path = os.path.join(checked_omr_dir, filename)
+
+            # Update navigation states
+            page_label.config(text=f"Page {current_index + 1} of {len(images)}")
+            btn_prev.config(state=NORMAL if current_index > 0 else DISABLED)
+            btn_next.config(state=NORMAL if current_index < len(images) - 1 else DISABLED)
+            
+            if dropdown_options:
+                combobox.current(current_index)
+
+            # Load and display image
+            try:
+                # Open with PIL
+                img = Image.open(image_path)
+                # Scale to fit left panel width/height (approx 550x650)
+                max_w, max_h = 550, 650
+                w, h = img.size
+                scale = min(max_w / w, max_h / h)
+                new_w, new_h = int(w * scale), int(h * scale)
+                img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                
+                photo = ImageTk.PhotoImage(img)
+                verify_win.image_ref = photo  # prevent garbage collection
+                image_label.config(image=photo, text="")
+            except Exception as ex:
+                image_label.config(image="", text=f"Error loading image:\n{ex}")
+
+            # Update parsed student details
+            student_row = csv_data.get(filename, {})
+            for row_k, row_v in csv_data.items():
+                if os.path.splitext(filename)[0] == os.path.splitext(row_k)[0]:
+                    student_row = row_v
+                    break
+
+            # Clear Tree
+            for item in tree.get_children():
+                tree.delete(item)
+
+            if student_row:
+                roll_val = ""
+                for k in ["Roll_no", "roll_no", "Roll", "roll"]:
+                    if k in student_row:
+                        roll_val = student_row[k].strip()
+                        break
+                score_val = student_row.get("score", "N/A").strip()
+                
+                roll_header.config(text=f"Roll Number: {roll_val}")
+                score_header.config(text=f"OMR Score: {score_val}")
+
+                # Populate Tree Comparison
+                for q in q_headers:
+                    s_ans = student_row.get(q, "").strip()
+                    c_ans = answer_key.get(q, "").strip()
+                    
+                    if s_ans == c_ans and c_ans:
+                        status = "Correct"
+                        tag = "correct"
+                    elif not s_ans:
+                        status = "Unmarked"
+                        tag = "unmarked"
+                    else:
+                        status = f"Incorrect (Correct: {c_ans})"
+                        tag = "incorrect"
+                    
+                    tree.insert("", END, values=(q.upper(), s_ans, c_ans, status), tags=(tag,))
+            else:
+                roll_header.config(text="Roll Number: N/A (Not parsed)")
+                score_header.config(text="OMR Score: N/A")
+
+        # Bind button commands
+        def on_prev():
+            nonlocal current_index
+            if current_index > 0:
+                current_index -= 1
+                update_page()
+
+        def on_next():
+            nonlocal current_index
+            if current_index < len(images) - 1:
+                current_index += 1
+                update_page()
+
+        def on_dropdown_select(event):
+            nonlocal current_index
+            sel = combobox.get()
+            if sel in roll_to_index:
+                current_index = roll_to_index[sel]
+                update_page()
+
+        btn_prev.config(command=on_prev)
+        btn_next.config(command=on_next)
+        combobox.bind("<<ComboboxSelected>>", on_dropdown_select)
+
+        # Load first page on start
+        update_page()
+
     # ---------- SETTINGS ----------
     def open_settings(self):
         settings_win = Toplevel(self.root)
         settings_win.title("Settings")
-        settings_win.geometry("500x550")
+        settings_win.geometry("500x580")
         settings_win.transient(self.root)
         settings_win.grab_set()
 
@@ -1634,7 +1910,8 @@ class TestManagerApp:
         python_cmd_var = StringVar(value=self.settings.get("python_command", raw=True))
         templates_dir_var = StringVar(value=self.settings.get("templates_dir", raw=True))
         firestore_key_var = StringVar(value=self.settings.get("firestore_auth_key", raw=True))
-        collection_var = StringVar(value=self.settings.get("firestore_collection", "results"))
+        collection_var = StringVar(value=self.settings.get("firestore_collection", "parents_token"))
+        parent_tokens_collection_var = StringVar(value=self.settings.get("parent_tokens_collection", "parent_tokens"))
         students_collection_var = StringVar(value=self.settings.get("students_collection", "students"))
         parent_notifications_collection_var = StringVar(value=self.settings.get("parent_notifications_collection", "parent_notifications"))
 
@@ -1673,8 +1950,12 @@ class TestManagerApp:
         Button(settings_win, text="Browse", command=lambda: browse_file(firestore_key_var)).grid(row=row, column=2, padx=5)
         row += 1
 
-        Label(settings_win, text="Firestore Collection (OMR results):").grid(row=row, column=0, sticky=W, padx=5, pady=5)
+        Label(settings_win, text="Results Collection:").grid(row=row, column=0, sticky=W, padx=5, pady=5)
         Entry(settings_win, textvariable=collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
+        row += 1
+
+        Label(settings_win, text="Parent Tokens Collection:").grid(row=row, column=0, sticky=W, padx=5, pady=5)
+        Entry(settings_win, textvariable=parent_tokens_collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
         row += 1
 
         Label(settings_win, text="Students Collection:").grid(row=row, column=0, sticky=W, padx=5, pady=5)
@@ -1692,6 +1973,7 @@ class TestManagerApp:
             self.settings.set("templates_dir", templates_dir_var.get())
             self.settings.set("firestore_auth_key", firestore_key_var.get())
             self.settings.set("firestore_collection", collection_var.get())
+            self.settings.set("parent_tokens_collection", parent_tokens_collection_var.get())
             self.settings.set("students_collection", students_collection_var.get())
             self.settings.set("parent_notifications_collection", parent_notifications_collection_var.get())
             messagebox.showinfo("Settings", "Settings saved.")
