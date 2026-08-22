@@ -126,7 +126,15 @@ Follow these steps for every OMR test you need to grade:
 2. Click **Yes** to confirm.
 3. The OMR engine will grade the sheets. Once finished, a table preview of the results containing student scores, Roll Numbers, and marked answers will load automatically on the right panel.
 
-### Step D: Sync Results with Cloud
+### Step D: Verify Results (Optional)
+1. Click **Verify CSV** to open the interactive sheet visualizer.
+2. Step page by page to review student OMR bubbles side-by-side with an interactive correct/incorrect answer comparison table.
+
+### Step E: Export Results (Optional)
+1. Click **Export CSV**.
+2. Select a save location on your device. The app suggests a clean name like `student_responses_[Test_Name].csv` and exports a CSV matching your student database import layout.
+
+### Step F: Sync Results with Cloud
 1. Click **Push to Firestore**.
 2. Confirm the prompt to upload. 
 3. The results will be pushed directly to your school cloud database!
@@ -189,6 +197,10 @@ This section details the historical developer steps, prompts, commits, and debug
 
 ## Step 12: FCM Push Notifications for Parents
 * **What We Did**: Added a one-click "Notify All Parents" button in the GUI and configured a new "Parent Tokens Collection" (default: `parent_tokens`) setting in Preferences. Implemented background execution logic that reads the latest OMR grading results, retrieves matching parent device registration tokens from Google Firestore (supporting lookups by document ID or fields matching student roll numbers), and pushes push notifications concurrently via the FCM v1 REST API.
+
+## Step 13: Export CSV, Results Verifier, and First-Page Answer Key Fallback
+* **What We Did**: Implemented **Export CSV** (formatting and downloading results to standard import format naming files automatically with safe test name slugs), **Verify CSV** (adding a responsive visual popup to review student OMR sheets side-by-side with correction comparison tables using Pillow), **First-Page Answer Key Fallback** (copying page 1 as answer key and removing the redundant student sheet copy if no separate key is uploaded), and resolved engine evaluation validation crashes by dynamically mapping questions and ignoring empty answer key bubbles.
+* **Commit**: `2a44993`
 
 
 

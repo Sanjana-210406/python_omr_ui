@@ -245,4 +245,20 @@ Implement a one-click "Notify All Parents" button in the Python OMR software das
 * **GUI Button & Flow Controls**: Added a "Notify All Parents" action button next to "Push to Firestore" that is enabled when a test is selected and disabled during long-running tasks.
 * **Concurrent Push Service**: Implemented background thread orchestrator `notify_parents` that fetches parent device tokens from Google Firestore (supporting roll number matching by document ID or query fields) and sends push notifications using a `ThreadPoolExecutor` targeting the official FCM v1 REST API. It reports a complete transmission summary containing counts for success, failure, and missing device registrations.
 
+---
+
+## Step 13: Export CSV, Results Verifier, and First-Page Answer Key Fallback
+
+### Goal
+Implement formatted CSV download capability matching the standard student import schema, add a graphical OMR sheet grading verifier/viewer popup, and enable fallback to use page 1 as the answer key while correcting engine schema dependency errors and missing answers validation crashes.
+
+### What We Did
+* **Export CSV Feature**: Added an "Export CSV" button. Reads the latest OMR checker results, filters metadata rows/answer key, sorts question columns numerically, and formats them matching `import.csv`. Dynamically saves file using safe test name slugs.
+* **Verify CSV visualizer**: Integrated Pillow and created a multi-pane `verify_results` Toplevel dialog. Displays the graded OMR sheet on the left and student particulars (Roll, Score) on the right with a scrollable comparative table (opted vs correct key, green/red/gray color tags). Features sheet navigation (Previous/Next) and combobox roll lookup jump-to functionality.
+* **Fallback Answer Key**: Configures page 1 as the answer key, duplicates and cleans file copies automatically when no key is uploaded. Sets `"questions_in_order"` in options and maps plural `"marking_schemes"` automatically to fulfill OMRChecker schema validation constraints.
+* **Engine Level Graceful Handling**: Modified OMRChecker's evaluation validator (`src/evaluation.py`) to warning-log and skip blank key answers dynamically, preventing crashes on unmarked questions.
+
+### Commit
+`2a44993`
+
 
