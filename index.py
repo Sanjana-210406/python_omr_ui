@@ -14,6 +14,8 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from google.cloud import firestore
 from google.oauth2 import service_account
 import fitz
+from PIL import Image, ImageTk
+
 
 
 # ========================== CONFIGURATION ==========================
@@ -860,6 +862,9 @@ class TestManagerApp:
         self.btn_notify = Button(action_frame, text="Notify All Parents", command=self.notify_parents, state=DISABLED)
         self.btn_notify.pack(side=LEFT, padx=2)
 
+        self.btn_verify = Button(action_frame, text="Verify CSV", command=self.verify_results, state=DISABLED)
+        self.btn_verify.pack(side=LEFT, padx=2)
+
         # Output display area
         self.output_frame = LabelFrame(right_frame, text="CSV Output", padx=5, pady=5)
         self.output_frame.pack(fill=BOTH, expand=True, pady=5)
@@ -915,6 +920,7 @@ class TestManagerApp:
                 self.btn_run.config(state=NORMAL)
                 self.btn_push.config(state=NORMAL)
                 self.btn_notify.config(state=NORMAL)
+                self.btn_verify.config(state=NORMAL)
                 # Clear output display
                 self.output_text.delete(1.0, END)
                 # Check if CSV exists in output dir and display it
@@ -928,6 +934,7 @@ class TestManagerApp:
             self.btn_run.config(state=DISABLED)
             self.btn_push.config(state=DISABLED)
             self.btn_notify.config(state=DISABLED)
+            self.btn_verify.config(state=DISABLED)
 
     # ---------- CRUD DIALOGS ----------
     def add_test_dialog(self):
@@ -1140,6 +1147,7 @@ class TestManagerApp:
         self.btn_run.config(state=DISABLED)
         self.btn_push.config(state=DISABLED)
         self.btn_notify.config(state=DISABLED)
+        self.btn_verify.config(state=DISABLED)
 
         def process():
             try:
@@ -1153,6 +1161,7 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
@@ -1160,6 +1169,7 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
 
         threading.Thread(target=process, daemon=True).start()
 
@@ -1213,6 +1223,7 @@ class TestManagerApp:
         self.btn_input_pdf.config(state=DISABLED)
         self.btn_push.config(state=DISABLED)
         self.btn_notify.config(state=DISABLED)
+        self.btn_verify.config(state=DISABLED)
 
         def run():
             try:
@@ -1226,6 +1237,7 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
@@ -1233,6 +1245,7 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1322,6 +1335,7 @@ class TestManagerApp:
         self.btn_run.config(state=DISABLED)
         self.btn_input_pdf.config(state=DISABLED)
         self.btn_notify.config(state=DISABLED)
+        self.btn_verify.config(state=DISABLED)
 
         def upload():
             try:
@@ -1335,6 +1349,7 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
@@ -1342,6 +1357,7 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
 
         threading.Thread(target=upload, daemon=True).start()
 
@@ -1379,6 +1395,7 @@ class TestManagerApp:
         self.btn_run.config(state=DISABLED)
         self.btn_input_pdf.config(state=DISABLED)
         self.btn_notify.config(state=DISABLED)
+        self.btn_verify.config(state=DISABLED)
 
         def run_notifications():
             try:
@@ -1592,6 +1609,7 @@ class TestManagerApp:
                     self.btn_run.config(state=NORMAL)
                     self.btn_input_pdf.config(state=NORMAL)
                     self.btn_notify.config(state=NORMAL)
+                    self.btn_verify.config(state=NORMAL)
 
                     summary_msg = (
                         f"Parent notifications for '{test_name}' complete.\n\n"
@@ -1615,10 +1633,288 @@ class TestManagerApp:
                     self.btn_run.config(state=NORMAL)
                     self.btn_input_pdf.config(state=NORMAL)
                     self.btn_notify.config(state=NORMAL)
+                    self.btn_verify.config(state=NORMAL)
                     messagebox.showerror("Error", f"Failed to queue notifications: {err}")
                 self.root.after(0, show_error)
 
         threading.Thread(target=run_notifications, daemon=True).start()
+
+    # ---------- VERIFY RESULTS ----------
+    def verify_results(self):
+        if not self.current_test_data:
+            return
+
+        output_dir = self.settings.get("output_dir")
+        checked_omr_dir = os.path.join(output_dir, "CheckedOMRs")
+        csv_files = self.processor.get_csv_files(output_dir)
+        csv_files = [f for f in csv_files if os.path.basename(f) != "Option_Analysis.csv"]
+
+        if not os.path.exists(checked_omr_dir) or not csv_files:
+            messagebox.showwarning("No Data", "No checked OMR images or CSV results found. Please run OMR grading first.")
+            return
+
+        # Find latest CSV
+        csv_files.sort(key=os.path.getmtime, reverse=True)
+        csv_path = csv_files[0]
+
+        # Load CSV data
+        csv_rows = []
+        try:
+            with open(csv_path, mode='r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                fieldnames = reader.fieldnames or []
+                for row in reader:
+                    csv_rows.append(row)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to read results CSV: {e}")
+            return
+
+        # Find Answer Key row and Question Headers
+        answer_key = {}
+        q_headers = []
+        for row in csv_rows:
+            roll_val = ""
+            for key_name in ["Roll_no", "roll_no", "Roll", "roll"]:
+                if key_name in row:
+                    roll_val = row[key_name].strip()
+                    break
+            file_id_val = row.get("file_id", "").strip()
+            if roll_val.upper() == "KEY" or file_id_val == "Answer Key":
+                answer_key = row
+                break
+
+        # If we have rows, extract question headers from the first row keys
+        if csv_rows:
+            q_headers = [h for h in csv_rows[0].keys() if h.lower().startswith("q") and h[1:].isdigit()]
+            q_headers.sort(key=lambda x: int(x[1:]))
+
+        # Index CSV data by file_id
+        csv_data = {}
+        for row in csv_rows:
+            file_id_val = row.get("file_id", "").strip()
+            if file_id_val:
+                csv_data[file_id_val] = row
+
+        # Get list of checked OMR images
+        try:
+            images = [f for f in os.listdir(checked_omr_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+            # Sort them numerically
+            def image_key(filename):
+                digits = "".join([c for c in filename if c.isdigit()])
+                return int(digits) if digits else 0
+            images.sort(key=image_key)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to scan CheckedOMRs directory: {e}")
+            return
+
+        if not images:
+            messagebox.showwarning("No Images", "No graded OMR images found in CheckedOMRs directory.")
+            return
+
+        # Create Window
+        verify_win = Toplevel(self.root)
+        verify_win.title(f"Verify OMR Results - {self.current_test_data['name']}")
+        verify_win.geometry("1000x750")
+        verify_win.transient(self.root)
+        verify_win.grab_set()
+
+        # Current page index tracker
+        current_index = 0
+
+        # Top Control Frame
+        top_frame = Frame(verify_win, padx=10, pady=10)
+        top_frame.pack(fill=X)
+
+        btn_prev = Button(top_frame, text="◀ Previous", width=12)
+        btn_prev.pack(side=LEFT, padx=5)
+
+        page_label = Label(top_frame, text="Page 1 of 1", font=("Arial", 12))
+        page_label.pack(side=LEFT, padx=10)
+
+        btn_next = Button(top_frame, text="Next ▶", width=12)
+        btn_next.pack(side=LEFT, padx=5)
+
+        # Dropdown Search
+        Label(top_frame, text="  Jump to:", font=("Arial", 12)).pack(side=LEFT)
+        
+        # Populate dropdown options
+        roll_to_index = {}
+        dropdown_options = []
+        for idx, img_name in enumerate(images):
+            row = csv_data.get(img_name, {})
+            roll = ""
+            for k in ["Roll_no", "roll_no", "Roll", "roll"]:
+                if k in row:
+                    roll = row[k].strip()
+                    break
+            if roll:
+                label_text = f"Roll {roll} ({img_name})"
+            else:
+                label_text = f"Unknown ({img_name})"
+            roll_to_index[label_text] = idx
+            dropdown_options.append(label_text)
+
+        combobox = ttk.Combobox(top_frame, values=dropdown_options, state="readonly", width=25)
+        combobox.pack(side=LEFT, padx=5)
+        if dropdown_options:
+            combobox.current(0)
+
+        # Main Split Area
+        main_frame = Frame(verify_win, padx=10, pady=5)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        # Left image panel
+        left_panel = LabelFrame(main_frame, text="Graded OMR Sheet", padx=5, pady=5)
+        left_panel.pack(side=LEFT, fill=BOTH, expand=True)
+
+        image_label = Label(left_panel, text="Loading Image...")
+        image_label.pack(fill=BOTH, expand=True)
+
+        # Right details panel
+        right_panel = LabelFrame(main_frame, text="Parsed Student Data", width=350, padx=10, pady=5)
+        right_panel.pack(side=RIGHT, fill=BOTH)
+        right_panel.pack_propagate(False)
+
+        # Student Summary Headers
+        info_frame = Frame(right_panel, pady=5)
+        info_frame.pack(fill=X)
+
+        roll_header = Label(info_frame, text="Roll Number: N/A", font=("Arial", 13, "bold"), anchor=W)
+        roll_header.pack(fill=X, pady=2)
+
+        score_header = Label(info_frame, text="OMR Score: N/A", font=("Arial", 13, "bold"), fg="blue", anchor=W)
+        score_header.pack(fill=X, pady=2)
+
+        # Treeview Comparison Table
+        table_frame = Frame(right_panel)
+        table_frame.pack(fill=BOTH, expand=True, pady=5)
+
+        columns = ("question", "student_ans", "correct_ans", "status")
+        tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
+        tree.heading("question", text="Q#")
+        tree.heading("student_ans", text="Opted")
+        tree.heading("correct_ans", text="Correct")
+        tree.heading("status", text="Status")
+
+        tree.column("question", width=50, anchor=CENTER)
+        tree.column("student_ans", width=70, anchor=CENTER)
+        tree.column("correct_ans", width=70, anchor=CENTER)
+        tree.column("status", width=130, anchor=W)
+
+        # Scrollbar for tree
+        scrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        
+        tree.pack(side=LEFT, fill=BOTH, expand=True)
+        scrollbar.pack(side=RIGHT, fill=Y)
+
+        # Tree Tags for formatting
+        tree.tag_configure("correct", foreground="green")
+        tree.tag_configure("incorrect", foreground="red")
+        tree.tag_configure("unmarked", foreground="gray")
+
+        # Page update function
+        def update_page():
+            nonlocal current_index
+            if not images:
+                return
+
+            filename = images[current_index]
+            image_path = os.path.join(checked_omr_dir, filename)
+
+            # Update navigation states
+            page_label.config(text=f"Page {current_index + 1} of {len(images)}")
+            btn_prev.config(state=NORMAL if current_index > 0 else DISABLED)
+            btn_next.config(state=NORMAL if current_index < len(images) - 1 else DISABLED)
+            
+            if dropdown_options:
+                combobox.current(current_index)
+
+            # Load and display image
+            try:
+                # Open with PIL
+                img = Image.open(image_path)
+                # Scale to fit left panel width/height (approx 550x650)
+                max_w, max_h = 550, 650
+                w, h = img.size
+                scale = min(max_w / w, max_h / h)
+                new_w, new_h = int(w * scale), int(h * scale)
+                img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                
+                photo = ImageTk.PhotoImage(img)
+                verify_win.image_ref = photo  # prevent garbage collection
+                image_label.config(image=photo, text="")
+            except Exception as ex:
+                image_label.config(image="", text=f"Error loading image:\n{ex}")
+
+            # Update parsed student details
+            student_row = csv_data.get(filename, {})
+            for row_k, row_v in csv_data.items():
+                if os.path.splitext(filename)[0] == os.path.splitext(row_k)[0]:
+                    student_row = row_v
+                    break
+
+            # Clear Tree
+            for item in tree.get_children():
+                tree.delete(item)
+
+            if student_row:
+                roll_val = ""
+                for k in ["Roll_no", "roll_no", "Roll", "roll"]:
+                    if k in student_row:
+                        roll_val = student_row[k].strip()
+                        break
+                score_val = student_row.get("score", "N/A").strip()
+                
+                roll_header.config(text=f"Roll Number: {roll_val}")
+                score_header.config(text=f"OMR Score: {score_val}")
+
+                # Populate Tree Comparison
+                for q in q_headers:
+                    s_ans = student_row.get(q, "").strip()
+                    c_ans = answer_key.get(q, "").strip()
+                    
+                    if s_ans == c_ans and c_ans:
+                        status = "Correct"
+                        tag = "correct"
+                    elif not s_ans:
+                        status = "Unmarked"
+                        tag = "unmarked"
+                    else:
+                        status = f"Incorrect (Correct: {c_ans})"
+                        tag = "incorrect"
+                    
+                    tree.insert("", END, values=(q.upper(), s_ans, c_ans, status), tags=(tag,))
+            else:
+                roll_header.config(text="Roll Number: N/A (Not parsed)")
+                score_header.config(text="OMR Score: N/A")
+
+        # Bind button commands
+        def on_prev():
+            nonlocal current_index
+            if current_index > 0:
+                current_index -= 1
+                update_page()
+
+        def on_next():
+            nonlocal current_index
+            if current_index < len(images) - 1:
+                current_index += 1
+                update_page()
+
+        def on_dropdown_select(event):
+            nonlocal current_index
+            sel = combobox.get()
+            if sel in roll_to_index:
+                current_index = roll_to_index[sel]
+                update_page()
+
+        btn_prev.config(command=on_prev)
+        btn_next.config(command=on_next)
+        combobox.bind("<<ComboboxSelected>>", on_dropdown_select)
+
+        # Load first page on start
+        update_page()
 
     # ---------- SETTINGS ----------
     def open_settings(self):
