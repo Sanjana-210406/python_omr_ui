@@ -860,6 +860,9 @@ class TestManagerApp:
         self.btn_notify = Button(action_frame, text="Notify All Parents", command=self.notify_parents, state=DISABLED)
         self.btn_notify.pack(side=LEFT, padx=2)
 
+        self.btn_export_csv = Button(action_frame, text="Export CSV", command=self.export_csv, state=DISABLED)
+        self.btn_export_csv.pack(side=LEFT, padx=2)
+
         # Output display area
         self.output_frame = LabelFrame(right_frame, text="CSV Output", padx=5, pady=5)
         self.output_frame.pack(fill=BOTH, expand=True, pady=5)
@@ -915,6 +918,7 @@ class TestManagerApp:
                 self.btn_run.config(state=NORMAL)
                 self.btn_push.config(state=NORMAL)
                 self.btn_notify.config(state=NORMAL)
+                self.btn_export_csv.config(state=NORMAL)
                 # Clear output display
                 self.output_text.delete(1.0, END)
                 # Check if CSV exists in output dir and display it
@@ -928,6 +932,7 @@ class TestManagerApp:
             self.btn_run.config(state=DISABLED)
             self.btn_push.config(state=DISABLED)
             self.btn_notify.config(state=DISABLED)
+            self.btn_export_csv.config(state=DISABLED)
 
     # ---------- CRUD DIALOGS ----------
     def add_test_dialog(self):
@@ -1140,6 +1145,7 @@ class TestManagerApp:
         self.btn_run.config(state=DISABLED)
         self.btn_push.config(state=DISABLED)
         self.btn_notify.config(state=DISABLED)
+        self.btn_export_csv.config(state=DISABLED)
 
         def process():
             try:
@@ -1153,6 +1159,7 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
@@ -1160,6 +1167,7 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
 
         threading.Thread(target=process, daemon=True).start()
 
@@ -1213,6 +1221,7 @@ class TestManagerApp:
         self.btn_input_pdf.config(state=DISABLED)
         self.btn_push.config(state=DISABLED)
         self.btn_notify.config(state=DISABLED)
+        self.btn_export_csv.config(state=DISABLED)
 
         def run():
             try:
@@ -1226,6 +1235,7 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
@@ -1233,6 +1243,7 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1322,6 +1333,7 @@ class TestManagerApp:
         self.btn_run.config(state=DISABLED)
         self.btn_input_pdf.config(state=DISABLED)
         self.btn_notify.config(state=DISABLED)
+        self.btn_export_csv.config(state=DISABLED)
 
         def upload():
             try:
@@ -1335,6 +1347,7 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
                 self.root.after(0, lambda: self.status_var.set("Error"))
@@ -1342,6 +1355,7 @@ class TestManagerApp:
                 self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
                 self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
+                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
 
         threading.Thread(target=upload, daemon=True).start()
 
@@ -1592,6 +1606,7 @@ class TestManagerApp:
                     self.btn_run.config(state=NORMAL)
                     self.btn_input_pdf.config(state=NORMAL)
                     self.btn_notify.config(state=NORMAL)
+                    self.btn_export_csv.config(state=NORMAL)
 
                     summary_msg = (
                         f"Parent notifications for '{test_name}' complete.\n\n"
@@ -1615,10 +1630,82 @@ class TestManagerApp:
                     self.btn_run.config(state=NORMAL)
                     self.btn_input_pdf.config(state=NORMAL)
                     self.btn_notify.config(state=NORMAL)
+                    self.btn_export_csv.config(state=NORMAL)
                     messagebox.showerror("Error", f"Failed to queue notifications: {err}")
                 self.root.after(0, show_error)
 
         threading.Thread(target=run_notifications, daemon=True).start()
+
+    # ---------- EXPORT CSV ----------
+    def export_csv(self):
+        if not self.current_test_data:
+            return
+
+        output_dir = self.settings.get("output_dir")
+        csv_files = self.processor.get_csv_files(output_dir)
+        csv_files = [f for f in csv_files if os.path.basename(f) != "Option_Analysis.csv"]
+
+        if not csv_files:
+            messagebox.showwarning("No CSV", "No graded CSV files found to export. Please run grading first.")
+            return
+
+        # Use the latest CSV results file
+        csv_files.sort(key=os.path.getmtime, reverse=True)
+        src_csv_path = csv_files[0]
+
+        test_name = self.current_test_data.get("name", "test")
+        safe_test_name = "".join(c if c.isalnum() or c in (' ', '_', '-') else '_' for c in test_name)
+        safe_test_name = safe_test_name.replace(" ", "_")
+
+        # Ask user where to save
+        save_path = filedialog.asksaveasfilename(
+            title="Export CSV",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialfile=f"student_responses_{safe_test_name}.csv"
+        )
+        if not save_path:
+            return
+
+        try:
+            with open(src_csv_path, mode='r', newline='', encoding='utf-8') as infile:
+                reader = csv.DictReader(infile)
+                fieldnames = reader.fieldnames or []
+                
+                # Identify and sort question columns (e.g. q1, q2... q60)
+                q_headers = [h for h in fieldnames if h.lower().startswith("q") and h[1:].isdigit()]
+                q_headers.sort(key=lambda x: int(x[1:]))
+
+                out_headers = ["Roll"] + q_headers
+
+                rows_to_write = []
+                for row in reader:
+                    # Filter out answer key rows
+                    roll_val = ""
+                    for key_name in ["Roll_no", "roll_no", "Roll", "roll"]:
+                        if key_name in row:
+                            roll_val = row[key_name].strip()
+                            break
+                    
+                    file_id_val = row.get("file_id", "").strip()
+                    if roll_val.upper() == "KEY" or file_id_val == "Answer Key":
+                        continue
+                    if not roll_val:
+                        continue
+                    
+                    new_row = {"Roll": roll_val}
+                    for q in q_headers:
+                        new_row[q] = row.get(q, "")
+                    rows_to_write.append(new_row)
+
+            with open(save_path, mode='w', newline='', encoding='utf-8') as outfile:
+                writer = csv.DictWriter(outfile, fieldnames=out_headers)
+                writer.writeheader()
+                writer.writerows(rows_to_write)
+
+            messagebox.showinfo("Success", f"CSV exported successfully to:\n{save_path}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export CSV: {e}")
 
     # ---------- SETTINGS ----------
     def open_settings(self):
