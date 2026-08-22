@@ -215,6 +215,38 @@ class PDFProcessor:
     def __init__(self, settings):
         self.settings = settings
 
+    def get_questions_in_order(self, input_dir):
+        template_path = os.path.join(input_dir, "template.json")
+        if not os.path.exists(template_path):
+            return []
+        try:
+            with open(template_path, 'r', encoding='utf-8') as f:
+                temp_data = json.load(f)
+            field_blocks = temp_data.get("fieldBlocks", {})
+            all_labels = []
+            for block in field_blocks.values():
+                all_labels.extend(block.get("fieldLabels", []))
+            
+            import re
+            questions = []
+            for label in all_labels:
+                range_match = re.match(r'^([qQ])(\d+)\.\.(\d+)$', label)
+                if range_match:
+                    prefix, start, end = range_match.groups()
+                    for i in range(int(start), int(end) + 1):
+                        questions.append(f"q{i}")
+                else:
+                    single_match = re.match(r'^([qQ])(\d+)$', label)
+                    if single_match:
+                        prefix, num = single_match.groups()
+                        questions.append(f"q{num}")
+            # Sort questions numerically (q1, q2... q50)
+            questions.sort(key=lambda x: int(x[1:]))
+            return questions
+        except Exception as e:
+            print(f"Error parsing template for questions_in_order: {e}")
+            return []
+
     def configure_answer_key(self, test_id, input_dir):
         base_input_dir = self.settings.get("input_dir", raw=True)
         
@@ -229,6 +261,60 @@ class PDFProcessor:
                 break
                 
         if not found_ext:
+            # Fallback: if no uploaded answer key is found, check if first page page_1.jpg exists in input_dir
+            first_page_path = os.path.join(input_dir, "page_1.jpg")
+            if os.path.exists(first_page_path):
+                dst_img_name = "answer_key.jpg"
+                dst_img_path = os.path.join(input_dir, dst_img_name)
+                try:
+                    shutil.copy2(first_page_path, dst_img_path)
+                    os.remove(first_page_path)
+                except Exception as e:
+                    print(f"Error copying first page as answer key: {e}")
+                    return
+
+                evaluation_json_path = os.path.join(input_dir, "evaluation.json")
+                if os.path.exists(evaluation_json_path):
+                    try:
+                        with open(evaluation_json_path, 'r') as f:
+                            data = json.load(f)
+                    except Exception as e:
+                        print(f"Error loading evaluation.json: {e}")
+                        data = {}
+                else:
+                    data = {}
+
+                data["source_type"] = "csv"
+                if "options" not in data:
+                    data["options"] = {}
+                data["options"]["answer_key_csv_path"] = "answer_key.csv"
+                data["options"]["answer_key_image_path"] = dst_img_name
+                data["options"]["questions_in_order"] = self.get_questions_in_order(input_dir)
+
+                # Make sure we don't have a stray answer_key.csv left over in the folder
+                stray_csv = os.path.join(input_dir, "answer_key.csv")
+                if os.path.exists(stray_csv):
+                    try:
+                        os.remove(stray_csv)
+                    except Exception as e:
+                        print(f"Error removing stray CSV: {e}")
+
+                if "marking_schemes" not in data:
+                    if "marking_scheme" in data:
+                        data["marking_schemes"] = data["marking_scheme"]
+                    else:
+                        data["marking_schemes"] = {
+                            "DEFAULT": {
+                                "correct": "1",
+                                "incorrect": "0",
+                                "unmarked": "0"
+                            }
+                        }
+                try:
+                    with open(evaluation_json_path, 'w') as f:
+                        json.dump(data, f, indent=4)
+                except Exception as e:
+                    print(f"Error writing evaluation.json: {e}")
             return
             
         # 1. If it's a JSON file, it replaces evaluation.json
@@ -309,6 +395,7 @@ class PDFProcessor:
                 data["options"] = {}
             data["options"]["answer_key_csv_path"] = "answer_key.csv"
             data["options"]["answer_key_image_path"] = dst_img_name
+            data["options"]["questions_in_order"] = self.get_questions_in_order(input_dir)
             
             # Make sure we don't have a stray answer_key.csv left over in the folder
             stray_csv = os.path.join(input_dir, "answer_key.csv")
@@ -319,13 +406,16 @@ class PDFProcessor:
                     print(f"Error removing stray CSV: {e}")
                     
             if "marking_schemes" not in data:
-                data["marking_schemes"] = {
-                    "DEFAULT": {
-                        "correct": "1",
-                        "incorrect": "0",
-                        "unmarked": "0"
+                if "marking_scheme" in data:
+                    data["marking_schemes"] = data["marking_scheme"]
+                else:
+                    data["marking_schemes"] = {
+                        "DEFAULT": {
+                            "correct": "1",
+                            "incorrect": "0",
+                            "unmarked": "0"
+                        }
                     }
-                }
             try:
                 with open(evaluation_json_path, 'w') as f:
                     json.dump(data, f, indent=4)
