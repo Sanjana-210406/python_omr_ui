@@ -268,12 +268,13 @@ class EvaluationConfig:
                         if re.search(empty_answer_regex, omr_response[question])
                     ]
                     if len(empty_answered_questions) > 0:
-                        logger.error(
-                            f"Found empty answers for questions: {empty_answered_questions}, empty value used: '{empty_val}'"
+                        logger.warning(
+                            f"Found empty answers for questions: {empty_answered_questions} in answer key image. Excluding them from evaluation."
                         )
-                        raise Exception(
-                            f"Found empty answers in file '{image_path}'. Please check your template again in the --setLayout mode."
-                        )
+                        self.questions_in_order = [
+                            q for q in self.questions_in_order
+                            if q not in empty_answered_questions
+                        ]
                 else:
                     logger.warning(
                         f"questions_in_order not provided, proceeding to use non-empty values as answer key"
