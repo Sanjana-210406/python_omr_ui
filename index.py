@@ -117,6 +117,13 @@ class SettingsManager:
             self.save()
             
         self._deploy_bundled_samples()
+        
+        # Ensure default directories exist on startup
+        for key in ["input_dir", "output_dir", "templates_dir"]:
+            path = self.get(key, raw=True)
+            if path:
+                os.makedirs(path, exist_ok=True)
+
         self.current_test_id = None
 
     def _deploy_bundled_samples(self):
@@ -613,7 +620,7 @@ class FirestoreUploader:
         if not auth_key_path or not os.path.exists(auth_key_path):
             raise Exception("Firestore auth key file not found. Please set it in Settings.")
 
-        collection = "parents_token"
+        collection = self.settings.get("firestore_collection", "parents_token")
 
         # Initialize Firestore
         credentials = service_account.Credentials.from_service_account_file(auth_key_path)
@@ -1419,7 +1426,7 @@ class TestManagerApp:
     def open_settings(self):
         settings_win = Toplevel(self.root)
         settings_win.title("Settings")
-        settings_win.geometry("500x550")
+        settings_win.geometry("500x580")
         settings_win.transient(self.root)
         settings_win.grab_set()
 
@@ -1429,7 +1436,7 @@ class TestManagerApp:
         python_cmd_var = StringVar(value=self.settings.get("python_command", raw=True))
         templates_dir_var = StringVar(value=self.settings.get("templates_dir", raw=True))
         firestore_key_var = StringVar(value=self.settings.get("firestore_auth_key", raw=True))
-        collection_var = StringVar(value="parents_token")
+        collection_var = StringVar(value=self.settings.get("firestore_collection", "parents_token"))
         parent_tokens_collection_var = StringVar(value=self.settings.get("parent_tokens_collection", "parent_tokens"))
         students_collection_var = StringVar(value=self.settings.get("students_collection", "students"))
         parent_notifications_collection_var = StringVar(value=self.settings.get("parent_notifications_collection", "parent_notifications"))
@@ -1469,7 +1476,9 @@ class TestManagerApp:
         Button(settings_win, text="Browse", command=lambda: browse_file(firestore_key_var)).grid(row=row, column=2, padx=5)
         row += 1
 
-
+        Label(settings_win, text="Results Collection:").grid(row=row, column=0, sticky=W, padx=5, pady=5)
+        Entry(settings_win, textvariable=collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
+        row += 1
 
         Label(settings_win, text="Parent Tokens Collection:").grid(row=row, column=0, sticky=W, padx=5, pady=5)
         Entry(settings_win, textvariable=parent_tokens_collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
@@ -1489,7 +1498,7 @@ class TestManagerApp:
             self.settings.set("python_command", python_cmd_var.get())
             self.settings.set("templates_dir", templates_dir_var.get())
             self.settings.set("firestore_auth_key", firestore_key_var.get())
-            self.settings.set("firestore_collection", "parents_token")
+            self.settings.set("firestore_collection", collection_var.get())
             self.settings.set("parent_tokens_collection", parent_tokens_collection_var.get())
             self.settings.set("students_collection", students_collection_var.get())
             self.settings.set("parent_notifications_collection", parent_notifications_collection_var.get())
