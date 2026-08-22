@@ -117,6 +117,13 @@ class SettingsManager:
             self.save()
             
         self._deploy_bundled_samples()
+        
+        # Ensure default directories exist on startup
+        for key in ["input_dir", "output_dir", "templates_dir"]:
+            path = self.get(key, raw=True)
+            if path:
+                os.makedirs(path, exist_ok=True)
+
         self.current_test_id = None
 
     def _deploy_bundled_samples(self):
