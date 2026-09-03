@@ -513,14 +513,30 @@ class PDFProcessor:
 
         try:
             import fitz
+            from PIL import Image
+            from pdf_darken import process_image
+
             doc = fitz.open(pdf_path)
             zoom = 300 / 72
             matrix = fitz.Matrix(zoom, zoom)
             page_count = len(doc)
+            darken_enabled = self.settings.get("darken_faint_bubbles", True)
 
             for i, page in enumerate(doc, start=1):
                 pix = page.get_pixmap(matrix=matrix)
-                pix.save(os.path.join(input_dir, f"page_{i}.jpg"))
+                img_path = os.path.join(input_dir, f"page_{i}.jpg")
+                pix.save(img_path)
+
+                if darken_enabled:
+                    try:
+                        pil_img = Image.open(img_path)
+                        darkened_img, _, candidates = process_image(pil_img)
+                        if candidates > 0:
+                            darkened_img.save(img_path)
+                            if progress_callback:
+                                progress_callback(f"Page {i}: Darkened {candidates} faint bubble marks.")
+                    except Exception as dark_err:
+                        print(f"Darken step skipped for page_{i}: {dark_err}")
 
             if progress_callback:
                 progress_callback(f"{page_count} pages converted.")
@@ -1966,6 +1982,10 @@ class TestManagerApp:
         Entry(settings_win, textvariable=parent_notifications_collection_var, width=30).grid(row=row, column=1, padx=5, columnspan=2, sticky=W)
         row += 1
 
+        darken_bubbles_var = BooleanVar(value=self.settings.get("darken_faint_bubbles", True))
+        Checkbutton(settings_win, text="Darken Faint OMR Bubbles on Import", variable=darken_bubbles_var).grid(row=row, column=0, columnspan=2, sticky=W, padx=5, pady=5)
+        row += 1
+
         def save_settings():
             self.settings.set("input_dir", input_dir_var.get())
             self.settings.set("output_dir", output_dir_var.get())
@@ -1976,6 +1996,7 @@ class TestManagerApp:
             self.settings.set("parent_tokens_collection", parent_tokens_collection_var.get())
             self.settings.set("students_collection", students_collection_var.get())
             self.settings.set("parent_notifications_collection", parent_notifications_collection_var.get())
+            self.settings.set("darken_faint_bubbles", darken_bubbles_var.get())
             messagebox.showinfo("Settings", "Settings saved.")
             settings_win.destroy()
 

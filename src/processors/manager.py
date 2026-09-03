@@ -87,6 +87,14 @@ class ProcessorManager:
         except Exception as e:
             logger.warning(f"Failed to manually import builtins: {e}")
 
+        try:
+            from src.processors.DarkenBubbles import DarkenBubbles, Darken
+            self.processors["DarkenBubbles"] = DarkenBubbles
+            self.processors["Darken"] = Darken
+            logger.info("Manually registered DarkenBubbles & Darken")
+        except Exception as e:
+            logger.warning(f"Failed to manually import DarkenBubbles: {e}")
+
     def walk_package(self, package):
         """walk the supplied package to retrieve all processors"""
         imported_package = __import__(package, fromlist=["blah"])
@@ -94,6 +102,8 @@ class ProcessorManager:
         for _, processor_name, ispkg in pkgutil.walk_packages(
             imported_package.__path__, imported_package.__name__ + "."
         ):
+            if "interfaces" in processor_name:
+                continue
             if not ispkg and processor_name != __name__:
                 processor_module = __import__(processor_name, fromlist=["blah"])
                 # https://stackoverflow.com/a/46206754/6242649
@@ -110,5 +120,21 @@ class ProcessorManager:
         logger.info(f"Loaded processors: {loaded_packages}")
 
 
-# Singleton export
-PROCESSOR_MANAGER = ProcessorManager()
+class LazyProcessorManager:
+    _instance = None
+
+    def _get_instance(self):
+        if LazyProcessorManager._instance is None:
+            LazyProcessorManager._instance = ProcessorManager()
+        return LazyProcessorManager._instance
+
+    def __getattr__(self, name):
+        return getattr(self._get_instance(), name)
+
+    def __getitem__(self, item):
+        return self._get_instance().processors[item]
+
+    def __contains__(self, item):
+        return item in self._get_instance().processors
+
+PROCESSOR_MANAGER = LazyProcessorManager()
