@@ -28,10 +28,16 @@ To enable cloud synchronization of OMR results, configure Google Firestore:
 
 ## 3. Creating & Packaging OMR Templates
 OMR Checker templates must be placed inside the `samples` (or `templates_dir`) folder. Each template must be a subdirectory containing:
-* `template.json`: Configures bubble layout coordinate maps.
+* `template.json`: Configures bubble layout coordinate maps. You can include `"DarkenBubbles"` (or `"Darken"`) in `preProcessors` to automatically darken faint gray bubble marks.
 * `evaluation.json`: Configures the grading weights. Make sure it uses `"marking_schemes"` (plural) to comply with OMRChecker specifications.
 * `answer_key.csv`: A CSV map containing correct answers for all questions.
 * `omr_marker.jpg`: Alignment marker asset.
+
+### Standalone Bubble Darkener Utilities
+- **`pdf-darken.py` & `main.py`**: Standalone command line scripts to darken lightly filled OMR bubbles in scanned images or PDFs before processing:
+  ```bash
+  python3 pdf-darken.py input.pdf -o output_darkened.pdf --threshold 205 --factor 0.22
+  ```
 
 ## 4. Administrative Security (PIN Hashing)
 The login screen is protected by a 6-digit PIN.
@@ -201,6 +207,15 @@ This section details the historical developer steps, prompts, commits, and debug
 ## Step 13: Export CSV, Results Verifier, and First-Page Answer Key Fallback
 * **What We Did**: Implemented **Export CSV** (formatting and downloading results to standard import format naming files automatically with safe test name slugs), **Verify CSV** (adding a responsive visual popup to review student OMR sheets side-by-side with correction comparison tables using Pillow), **First-Page Answer Key Fallback** (copying page 1 as answer key and removing the redundant student sheet copy if no separate key is uploaded), and resolved engine evaluation validation crashes by dynamically mapping questions and ignoring empty answer key bubbles.
 * **Commit**: `2a44993`
+
+## Step 14: OMR Bubble Darkener Feature (CLI, Preprocessor Engine, & GUI Integration)
+* **What We Did**: Implemented the OMR bubble darkener algorithm based on `pdf-darken.py` to detect faint gray bubble marks in scanned OMR answer sheets and darken them while avoiding text, unfilled outlines, and background paper.
+  * **Standalone CLI Tools (`pdf-darken.py` & `main.py`)**: Created executable scripts to process single images or PDFs (`python3 pdf-darken.py input.pdf -o output_darkened.pdf`), supporting options `--threshold`, `--factor`, `--min-diameter-ratio`, `--max-diameter-ratio`, `--pdf-dpi`, `--pdftoppm`, and `--debug-mask`.
+  * **Image Preprocessor (`DarkenBubbles` / `Darken`)**: Created `DarkenBubbles` preprocessor in `src/processors/DarkenBubbles.py` and registered it in `ProcessorManager` so any OMR template can use `"DarkenBubbles"` in `template.json`.
+  * **GUI Preference Integration**: Added automatic darkening of converted PDF pages during import and a "Darken Faint OMR Bubbles on Import" checkbox in **Settings → Preferences**.
+  * **Lazy Processor Manager**: Converted `PROCESSOR_MANAGER` export to a lazy proxy to eliminate circular import warnings during startup.
+* **Commit**: `67fb41a`
+
 
 
 

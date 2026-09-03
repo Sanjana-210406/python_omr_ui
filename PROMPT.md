@@ -261,4 +261,20 @@ Implement formatted CSV download capability matching the standard student import
 ### Commit
 `2a44993`
 
+---
+
+## Step 14: OMR Bubble Darkener Feature (CLI, Preprocessor Engine, & GUI Integration)
+
+### Goal
+Implement an automated algorithm to detect faint gray bubble fills in scanned OMR sheets (raster images and PDFs) and darken them so OMR engines can read them reliably without misinterpreting unfilled outlines, printed text, or handwriting. Expose the darkener via CLI scripts (`pdf-darken.py` and `main.py`), a built-in preprocessor (`DarkenBubbles` / `Darken`), and a GUI setting.
+
+### What We Did
+* **Core Algorithm & CLI Tools**: Created `pdf_darken.py` and executable `pdf-darken.py` implementing luminance calculation, connected components (using OpenCV `cv2.connectedComponentsWithStats` with pure Python BFS fallback), size/aspect/circularity/disk density filters, dilation, and darkening.
+* **Unified Entry Point**: Built `main.py` to support both single image/PDF darkener commands (`python3 main.py input.pdf -o output.pdf`) and standard OMR engine execution (`python3 main.py --inputDir {input} --outputDir {output}`).
+* **ImagePreprocessor**: Implemented `DarkenBubbles` (and alias `Darken`) in `src/processors/DarkenBubbles.py` and registered it in `ProcessorManager` so templates can use `"DarkenBubbles"` in `template.json`.
+* **GUI Integration & Lazy Manager**: Modified `PDFProcessor.process_pdf` in `index.py` to automatically darken faint bubbles during PDF import when enabled, added a "Darken Faint OMR Bubbles on Import" checkbox in Preferences, and converted `PROCESSOR_MANAGER` to a lazy proxy to eliminate circular import warnings.
+* **Testing**: Added unit test `src/tests/test_darken.py` testing synthetic faint circle detection, luminance, and preprocessor execution.
+
+### Commit
+`67fb41a`
 
