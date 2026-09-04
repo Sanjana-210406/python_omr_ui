@@ -1474,12 +1474,15 @@ class TestManagerApp:
         else:
             info_text.insert(END, f"⚠️ NOTICE: {success} of {total} sheets graded successfully ({errors} failed).\n\n")
             info_text.insert(END, "Why did the command run successfully?\n")
-            info_text.insert(END, f"The OMR engine graded all {success} valid student sheets and saved their scores to the results table.\n")
-            info_text.insert(END, f"The {errors} unreadable sheet(s) below could not be aligned (e.g. corner markers missing or scanned upside-down) and were moved to the 'ErrorFiles' folder so they did not stop the rest of your class from being graded.\n\n")
+            info_text.insert(END, f"• The OMR engine graded all {success} valid student sheets and saved their scores to the results table.\n")
+            info_text.insert(END, f"• The {errors} unreadable sheet(s) could not be aligned (e.g. corner markers missing or scanned upside-down) and were moved to the 'ErrorFiles' folder so they did not stop the rest of your class from being graded.\n\n")
             info_text.insert(END, f"Unreadable / Failed Sheets ({errors}):\n")
             for fname, reason in error_details:
                 info_text.insert(END, f"  • {fname}: {reason}\n")
-            info_text.insert(END, "\nTip: Check if the failed sheet scan is rotated, blurry, or missing corner markers.")
+            info_text.insert(END, "\n📋 How to fix & re-run unreadable sheets:\n")
+            info_text.insert(END, "  1. Click 'Darken & Re-run' below if bubbles or corner markers are faint/light.\n")
+            info_text.insert(END, "  2. Click 'Open Error Folder' to inspect the unreadable image in Finder/Explorer.\n")
+            info_text.insert(END, "  3. If rotated or upside-down, rotate the scan right-side up, save to input directory, and click 'Run Command' again.\n")
 
         info_text.config(state=DISABLED)
 
@@ -1487,8 +1490,25 @@ class TestManagerApp:
         btn_frame = Frame(summary_win, pady=10)
         btn_frame.pack(fill=X)
 
-        Button(btn_frame, text="OK", command=summary_win.destroy, width=12, font=("Arial", 10, "bold")).pack(side=RIGHT, padx=15)
-        Button(btn_frame, text="Verify Sheets", command=lambda: [summary_win.destroy(), self.verify_results()], width=14).pack(side=RIGHT, padx=5)
+        def open_error_folder():
+            output_dir = self.settings.get("output_dir")
+            error_dir = os.path.join(output_dir, "Manual", "ErrorFiles")
+            os.makedirs(error_dir, exist_ok=True)
+            try:
+                if sys.platform == "darwin":
+                    subprocess.run(["open", error_dir])
+                elif sys.platform == "win32":
+                    os.startfile(error_dir)
+                else:
+                    subprocess.run(["xdg-open", error_dir])
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not open error folder: {e}")
+
+        Button(btn_frame, text="OK", command=summary_win.destroy, width=10, font=("Arial", 10, "bold")).pack(side=RIGHT, padx=10)
+        Button(btn_frame, text="Verify Sheets", command=lambda: [summary_win.destroy(), self.verify_results()], width=12).pack(side=RIGHT, padx=4)
+        if errors > 0:
+            Button(btn_frame, text="Darken & Re-run", command=lambda: [summary_win.destroy(), self.darken_csv()], width=14, bg="#1d4ed8", fg="white").pack(side=RIGHT, padx=4)
+            Button(btn_frame, text="Open Error Folder", command=open_error_folder, width=15).pack(side=RIGHT, padx=4)
 
     # ---------- DISPLAY CSV ----------
     def display_latest_csv(self):
