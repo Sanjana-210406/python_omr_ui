@@ -1643,7 +1643,7 @@ class TestManagerApp:
         csv_files.sort(key=os.path.getmtime, reverse=True)
         src_csv_path = csv_files[0]
 
-        test_name = self.current_test_data.get("name", "test")
+        test_name = str(self.current_test_data.get("name", "test"))
         safe_test_name = "".join(c if c.isalnum() or c in (' ', '_', '-') else '_' for c in test_name).replace(" ", "_")
         default_filename = f"student_responses_{safe_test_name}.csv"
 
