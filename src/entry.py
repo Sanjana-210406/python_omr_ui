@@ -157,8 +157,9 @@ def process_dir(
         )
         if args["setLayout"]:
             show_template_layouts(omr_files, template, tuning_config, outputs_namespace)
+            return None
         else:
-            process_files(
+            return process_files(
                 omr_files,
                 template,
                 tuning_config,
@@ -367,10 +368,17 @@ def process_files(
     files_counter = 0
     STATS.files_not_moved = 0
 
+    summary_stats = {
+        "total_files": 0,
+        "success_count": 0,
+        "multi_marked_count": 0,
+        "error_count": 0,
+        "error_details": [],
+    }
+
     # 1. Parse the first page of the PDF (the teacher's key sheet) to get the answer key
     if omr_files and evaluation_config is not None:
         key_file = omr_files[0]
-        logger.info(f"Extracting answer key from first page: {key_file.name}")
         try:
             images = ImageUtils.load_omr_image(key_file, tuning_config)
             for img_name, in_omr in images:
@@ -392,7 +400,7 @@ def process_files(
                     evaluation_config.question_to_answer_matcher = evaluation_config.parse_answers_and_map_questions(
                         parsed_answers
                     )
-                    logger.info(f"Successfully loaded answer key from first page: {key_response}")
+                    logger.info(f"Loaded answer key from first page ({img_name}).")
                     
                     # Also write these parsed answers to answer_key.csv in the input directory
                     csv_path = Path(evaluation_config.path).parent.joinpath("answer_key.csv")
@@ -402,32 +410,60 @@ def process_files(
                             f.write(f"{q},{ans}\n")
                     logger.info(f"Saved parsed answer key to {csv_path}")
         except Exception as e:
-            logger.error(f"Failed to automatically extract answer key from first page: {e}")
+            if getattr(evaluation_config, "question_to_answer_matcher", None):
+                logger.info("Using pre-configured answer key file.")
+            else:
+                logger.info(f"First page is a student sheet (no key auto-extracted). Using configured key settings.")
 
-    # Collect names from non-PDF files to detect collisions
-    image_file_names = {f.name for f in omr_files if f.suffix.lower() != ".pdf"}
-
+    # Collect images first to get accurate count for live progress
+    sheet_items = []
     for file_path in omr_files:
         images = ImageUtils.load_omr_image(file_path, tuning_config)
         for img_name, in_omr in images:
-            if file_path.suffix.lower() == ".pdf" and img_name in image_file_names:
-                logger.warning(
-                    f"PDF page name '{img_name}' collides with an existing image file, output may be overwritten."
-                )
-            files_counter += 1
-            _process_single_image(
-                file_path,
-                img_name,
-                in_omr,
-                template,
-                tuning_config,
-                evaluation_config,
-                outputs_namespace,
-                files_counter,
-            )
+            sheet_items.append((file_path, img_name, in_omr))
+
+    total_sheets = len(sheet_items)
+    summary_stats["total_files"] = total_sheets
+
+    logger.info(f"Starting OMR grading for {total_sheets} sheet(s)...")
+
+    for file_path, img_name, in_omr in sheet_items:
+        files_counter += 1
+        pct = int(files_counter * 100 / total_sheets) if total_sheets > 0 else 100
+        logger.info(f"Grading sheet {files_counter} of {total_sheets} ({pct}%): '{img_name}'...")
+
+        status = _process_single_image(
+            file_path,
+            img_name,
+            in_omr,
+            template,
+            tuning_config,
+            evaluation_config,
+            outputs_namespace,
+            files_counter,
+        )
+
+        if status is None:
+            summary_stats["error_count"] += 1
+            summary_stats["error_details"].append((img_name, "Corner alignment markers not detected (Quad matching failed)"))
+            logger.info(f"Sheet {files_counter}/{total_sheets} ('{img_name}'): Alignment failed (moved to ErrorFiles)")
+        elif status > 0:
+            summary_stats["multi_marked_count"] += 1
+            summary_stats["success_count"] += 1
+            logger.info(f"Sheet {files_counter}/{total_sheets} ('{img_name}'): Graded (Multi-marked warnings)")
+        else:
+            summary_stats["success_count"] += 1
+            logger.info(f"Sheet {files_counter}/{total_sheets} ('{img_name}'): Graded successfully")
 
     print_stats(start_time, files_counter, tuning_config)
     generate_option_analysis(outputs_namespace, template, evaluation_config)
+
+    logger.info(
+        f"Completed grading: {summary_stats['success_count']}/{total_sheets} sheets graded successfully "
+        f"({summary_stats['error_count']} unreadable/failed)."
+    )
+
+    return summary_stats
 
 
 def generate_option_analysis(outputs_namespace, template, evaluation_config):

@@ -3,11 +3,15 @@
     "output_dir": "",
     "python_command": "python3 main.py --inputDir {input} --outputDir {output}",
     "templates_dir": "",
-    "input_dir_darwin": "",
-    "output_dir_darwin": "",
+    "input_dir_darwin": "/Users/sunil_kadam/Desktop/python_omr_ui/inputs",
+    "output_dir_darwin": "/Users/sunil_kadam/Desktop/python_omr_ui/outputs",
     "python_command_darwin": "python3 ../OMRChecker-master/main.py --inputDir {input} --outputDir {output}",
-    "templates_dir_darwin": "",
-    "firestore_auth_key": "",
+    "templates_dir_darwin": "/Users/sunil_kadam/Desktop/python_omr_ui/samples",
+    "firestore_auth_key": "/Users/sunil_kadam/Desktop/python_omr_ui/serviceAccountKey.json",
     "firestore_collection": "parents_token",
-    "pin_hash": "b793b8a2a836ace068aa00d005f04f590e0abd13961f41d26ec52376e0eb7ea1"
+    "pin_hash": "b793b8a2a836ace068aa00d005f04f590e0abd13961f41d26ec52376e0eb7ea1",
+    "parent_tokens_collection": "parent_tokens",
+    "students_collection": "students",
+    "parent_notifications_collection": "parent_notifications",
+    "darken_faint_bubbles": true
 }

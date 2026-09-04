@@ -586,6 +586,10 @@ class PDFProcessor:
                     def emit(self, record):
                         try:
                             msg = self.format(record)
+                            if "Error: No circle found in Quad" in msg:
+                                first_line = msg.strip().split("\n")[0]
+                                fname = os.path.basename(first_line) if first_line else "Sheet"
+                                msg = f"⚠️ Sheet '{fname}': Corner alignment markers not detected. Moved to ErrorFiles."
                             self.callback(msg)
                         except Exception:
                             pass
@@ -610,11 +614,14 @@ class PDFProcessor:
                         "setLayout": False
                     }
                     
+                    stats = None
                     for root_path in args["input_paths"]:
-                        entry_point(Path(root_path), args)
+                        stats = entry_point(Path(root_path), args)
                         
                     if progress_callback:
                         progress_callback("OMR completed successfully.")
+
+                    return stats
                         
                 finally:
                     # Clean up handler
@@ -1234,31 +1241,254 @@ class TestManagerApp:
         self.btn_export_csv.config(state=DISABLED)
         self.btn_verify.config(state=DISABLED)
 
+        # Create Live Progress Modal Window
+        progress_win = Toplevel(self.root)
+        progress_win.title("OMR Grading Live Progress")
+        progress_win.geometry("640x520")
+        progress_win.transient(self.root)
+        progress_win.grab_set()
+
+        # Header Frame
+        header_frame = Frame(progress_win, bg="#0f172a", padx=15, pady=12)
+        header_frame.pack(fill=X)
+
+        title_label = Label(
+            header_frame,
+            text="⚙️ Live OMR Batch Grading",
+            font=("Arial", 15, "bold"),
+            bg="#0f172a",
+            fg="white"
+        )
+        title_label.pack(anchor=W)
+
+        sub_label = Label(
+            header_frame,
+            text="Evaluating student response sheets from PDF / input directory...",
+            font=("Arial", 10),
+            bg="#0f172a",
+            fg="#94a3b8"
+        )
+        sub_label.pack(anchor=W, pady=(2, 0))
+
+        # Progress bar
+        pbar_frame = Frame(progress_win, padx=15, pady=10)
+        pbar_frame.pack(fill=X)
+
+        pbar = ttk.Progressbar(pbar_frame, orient=HORIZONTAL, mode='determinate')
+        pbar.pack(fill=X, side=TOP, pady=2)
+
+        pbar_text_var = StringVar(value="Initializing OMR Engine...")
+        pbar_label = Label(pbar_frame, textvariable=pbar_text_var, font=("Arial", 10), fg="#475569")
+        pbar_label.pack(anchor=W, pady=(4, 0))
+
+        # Stat cards
+        cards_frame = Frame(progress_win, padx=15, pady=5)
+        cards_frame.pack(fill=X)
+
+        var_total = StringVar(value="0")
+        var_running = StringVar(value="-")
+        var_success = StringVar(value="0")
+        var_error = StringVar(value="0")
+
+        def make_live_card(parent, title, text_var, bg_color, fg_color):
+            card = Frame(parent, bg=bg_color, bd=1, relief=SOLID, padx=8, pady=6)
+            card.pack(side=LEFT, expand=True, fill=BOTH, padx=3)
+            Label(card, text=title, font=("Arial", 9), bg=bg_color, fg=fg_color).pack()
+            Label(card, textvariable=text_var, font=("Arial", 14, "bold"), bg=bg_color, fg=fg_color).pack()
+            return card
+
+        make_live_card(cards_frame, "Total Sheets", var_total, "#f1f5f9", "#334155")
+        make_live_card(cards_frame, "Current Sheet", var_running, "#eff6ff", "#1d4ed8")
+        make_live_card(cards_frame, "Graded", var_success, "#ecfdf5", "#047857")
+        make_live_card(cards_frame, "Unreadable", var_error, "#fef2f2", "#dc2626")
+
+        # Live Log Text Area
+        log_frame = LabelFrame(progress_win, text="Live Activity Log", padx=10, pady=5)
+        log_frame.pack(fill=BOTH, expand=True, padx=15, pady=8)
+
+        log_text = scrolledtext.ScrolledText(log_frame, height=9, wrap=WORD, font=("Consolas", 10))
+        log_text.pack(fill=BOTH, expand=True)
+
+        log_text.tag_config("info", foreground="#1e293b")
+        log_text.tag_config("error", foreground="#dc2626", font=("Consolas", 10, "bold"))
+        log_text.tag_config("success", foreground="#047857")
+
+        def update_ui_log(msg):
+            # Parse progress messages to update stat cards and progress bar dynamically
+            if "Starting OMR grading for" in msg:
+                try:
+                    num = int(msg.split("for")[1].split("sheet")[0].strip())
+                    var_total.set(str(num))
+                    pbar["maximum"] = num
+                except Exception:
+                    pass
+            elif "Grading sheet" in msg:
+                try:
+                    parts = msg.split()
+                    curr = int(parts[2])
+                    total = int(parts[4])
+                    img_name = msg.split("'")[1] if "'" in msg else ""
+                    var_total.set(str(total))
+                    var_running.set(f"{curr}/{total}")
+                    pbar["value"] = curr
+                    pbar_text_var.set(f"Grading sheet {curr} of {total} ({int(curr*100/total)}%): {img_name}")
+                except Exception:
+                    pass
+            elif "Graded successfully" in msg or "Graded (Multi-marked" in msg:
+                try:
+                    var_success.set(str(int(var_success.get()) + 1))
+                except Exception:
+                    pass
+            elif "Alignment failed" in msg or "Unreadable scan" in msg or "Error" in msg:
+                try:
+                    var_error.set(str(int(var_error.get()) + 1))
+                except Exception:
+                    pass
+
+            tag = "info"
+            if "Error" in msg or "failed" in msg or "Unreadable" in msg or "⚠️" in msg:
+                tag = "error"
+            elif "Graded successfully" in msg or "Completed grading" in msg or "Loaded answer key" in msg:
+                tag = "success"
+
+            log_text.insert(END, msg + "\n", tag)
+            log_text.see(END)
+            self.status_var.set(msg)
+
         def run():
             try:
                 def progress(msg):
-                    self.root.after(0, lambda: self.status_var.set(msg))
-                self.processor.run_command(progress_callback=progress)
-                self.root.after(0, lambda: messagebox.showinfo("Success", "Command executed successfully."))
-                self.root.after(0, self.display_latest_csv)
-                self.root.after(0, lambda: self.status_var.set("Ready"))
-                self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
-                self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
-                self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
-                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
-                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
-                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
+                    self.root.after(0, lambda m=msg: update_ui_log(m))
+
+                stats = self.processor.run_command(progress_callback=progress)
+                
+                total_f = stats.get("total_files", 0) if isinstance(stats, dict) else 0
+                succ_f = stats.get("success_count", 0) if isinstance(stats, dict) else 0
+                err_f = stats.get("error_count", 0) if isinstance(stats, dict) else 0
+
+                final_status = (
+                    f"Grading complete: {succ_f}/{total_f} sheets graded successfully ({err_f} unreadable moved to ErrorFiles)."
+                    if err_f > 0
+                    else f"Grading complete: All {total_f} sheets graded successfully!"
+                )
+
+                def on_complete():
+                    try:
+                        progress_win.destroy()
+                    except Exception:
+                        pass
+                    self.display_latest_csv()
+                    self.show_grading_summary_dialog(stats)
+                    self.status_var.set(final_status)
+                    self.btn_run.config(state=NORMAL)
+                    self.btn_input_pdf.config(state=NORMAL)
+                    self.btn_push.config(state=NORMAL)
+                    self.btn_notify.config(state=NORMAL)
+                    self.btn_export_csv.config(state=NORMAL)
+                    self.btn_verify.config(state=NORMAL)
+
+                self.root.after(500, on_complete)
+
             except Exception as e:
-                self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
-                self.root.after(0, lambda: self.status_var.set("Error"))
-                self.root.after(0, lambda: self.btn_run.config(state=NORMAL))
-                self.root.after(0, lambda: self.btn_input_pdf.config(state=NORMAL))
-                self.root.after(0, lambda: self.btn_push.config(state=NORMAL))
-                self.root.after(0, lambda: self.btn_notify.config(state=NORMAL))
-                self.root.after(0, lambda: self.btn_export_csv.config(state=NORMAL))
-                self.root.after(0, lambda: self.btn_verify.config(state=NORMAL))
+                def on_error(err_msg):
+                    try:
+                        progress_win.destroy()
+                    except Exception:
+                        pass
+                    messagebox.showerror("Error", err_msg)
+                    self.status_var.set("Error")
+                    self.btn_run.config(state=NORMAL)
+                    self.btn_input_pdf.config(state=NORMAL)
+                    self.btn_push.config(state=NORMAL)
+                    self.btn_notify.config(state=NORMAL)
+                    self.btn_export_csv.config(state=NORMAL)
+                    self.btn_verify.config(state=NORMAL)
+
+                self.root.after(0, lambda err_msg=str(e): on_error(err_msg))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def show_grading_summary_dialog(self, stats):
+        summary_win = Toplevel(self.root)
+        summary_win.title("OMR Grading Summary")
+        summary_win.geometry("640x540")
+        summary_win.transient(self.root)
+        summary_win.grab_set()
+
+        total = stats.get("total_files", 0) if isinstance(stats, dict) else 0
+        success = stats.get("success_count", 0) if isinstance(stats, dict) else 0
+        multi_marked = stats.get("multi_marked_count", 0) if isinstance(stats, dict) else 0
+        errors = stats.get("error_count", 0) if isinstance(stats, dict) else 0
+        error_details = stats.get("error_details", []) if isinstance(stats, dict) else []
+
+        # Top Title Header Frame
+        header_frame = Frame(summary_win, bg="#1e293b", padx=15, pady=15)
+        header_frame.pack(fill=X)
+
+        title_label = Label(
+            header_frame,
+            text="📊 OMR Batch Grading Report",
+            font=("Arial", 16, "bold"),
+            bg="#1e293b",
+            fg="white"
+        )
+        title_label.pack(anchor=W)
+
+        subtitle_text = f"Batch processing completed for {total} sheet(s) in PDF / input directory."
+        sub_label = Label(
+            header_frame,
+            text=subtitle_text,
+            font=("Arial", 11),
+            bg="#1e293b",
+            fg="#94a3b8"
+        )
+        sub_label.pack(anchor=W, pady=(2, 0))
+
+        # Statistics Cards Frame
+        cards_frame = Frame(summary_win, padx=15, pady=10)
+        cards_frame.pack(fill=X)
+
+        def make_card(parent, title, value, bg_color, fg_color):
+            card = Frame(parent, bg=bg_color, bd=1, relief=SOLID, padx=10, pady=8)
+            card.pack(side=LEFT, expand=True, fill=BOTH, padx=4)
+            Label(card, text=title, font=("Arial", 10), bg=bg_color, fg=fg_color).pack()
+            Label(card, text=str(value), font=("Arial", 16, "bold"), bg=bg_color, fg=fg_color).pack()
+            return card
+
+        make_card(cards_frame, "Total Sheets", total, "#f1f5f9", "#334155")
+        make_card(cards_frame, "Graded", success, "#ecfdf5", "#047857")
+        make_card(cards_frame, "Multi-Marked", multi_marked, "#fffbe6", "#b45309")
+        make_card(cards_frame, "Unreadable / Failed", errors, "#fef2f2" if errors > 0 else "#f1f5f9", "#dc2626" if errors > 0 else "#64748b")
+
+        # Main Info & Guidance Area
+        info_frame = LabelFrame(summary_win, text="Batch Status & Explanation", padx=10, pady=10)
+        info_frame.pack(fill=BOTH, expand=True, padx=15, pady=5)
+
+        info_text = scrolledtext.ScrolledText(info_frame, height=10, wrap=WORD, font=("Arial", 11))
+        info_text.pack(fill=BOTH, expand=True)
+
+        if errors == 0:
+            info_text.insert(END, "✅ BATCH SUCCESS: All student sheets were graded successfully!\n\n")
+            info_text.insert(END, f"• All {total} student response sheet(s) were aligned, evaluated, and saved to the CSV results table.\n")
+            info_text.insert(END, "• You can click 'Verify CSV' to visually inspect student sheets or 'Export CSV' to download the results.\n")
+        else:
+            info_text.insert(END, f"⚠️ NOTICE: {success} of {total} sheets graded successfully ({errors} failed).\n\n")
+            info_text.insert(END, "Why did the command run successfully?\n")
+            info_text.insert(END, f"The OMR engine graded all {success} valid student sheets and saved their scores to the results table.\n")
+            info_text.insert(END, f"The {errors} unreadable sheet(s) below could not be aligned (e.g. corner markers missing or scanned upside-down) and were moved to the 'ErrorFiles' folder so they did not stop the rest of your class from being graded.\n\n")
+            info_text.insert(END, f"Unreadable / Failed Sheets ({errors}):\n")
+            for fname, reason in error_details:
+                info_text.insert(END, f"  • {fname}: {reason}\n")
+            info_text.insert(END, "\nTip: Check if the failed sheet scan is rotated, blurry, or missing corner markers.")
+
+        info_text.config(state=DISABLED)
+
+        # Buttons
+        btn_frame = Frame(summary_win, pady=10)
+        btn_frame.pack(fill=X)
+
+        Button(btn_frame, text="OK", command=summary_win.destroy, width=12, font=("Arial", 10, "bold")).pack(side=RIGHT, padx=15)
+        Button(btn_frame, text="Verify Sheets", command=lambda: [summary_win.destroy(), self.verify_results()], width=14).pack(side=RIGHT, padx=5)
 
     # ---------- DISPLAY CSV ----------
     def display_latest_csv(self):
