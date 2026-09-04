@@ -1645,17 +1645,35 @@ class TestManagerApp:
 
         test_name = self.current_test_data.get("name", "test")
         safe_test_name = "".join(c if c.isalnum() or c in (' ', '_', '-') else '_' for c in test_name).replace(" ", "_")
+        default_filename = f"student_responses_{safe_test_name}.csv"
 
-        # Ask user where to save
-        save_path = filedialog.asksaveasfilename(
-            parent=self.root,
-            title="Export CSV",
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            initialfile=f"student_responses_{safe_test_name}.csv"
-        )
+        user_downloads_dir = os.path.expanduser("~/Downloads")
+        if not os.path.exists(user_downloads_dir):
+            user_downloads_dir = os.path.expanduser("~")
+
+        downloads_target = os.path.join(user_downloads_dir, default_filename)
+
+        # Force lift root window to ensure dialog pops up on top
+        self.root.lift()
+        self.root.focus_force()
+
+        # Open File Dialog with default pointing to Downloads folder
+        save_path = None
+        try:
+            save_path = filedialog.asksaveasfilename(
+                parent=self.root,
+                title="Export CSV",
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                initialdir=user_downloads_dir,
+                initialfile=default_filename
+            )
+        except Exception as dialog_err:
+            print(f"File dialog error: {dialog_err}")
+
+        # If user closed or bypassed dialog, default to Downloads folder
         if not save_path:
-            return
+            save_path = downloads_target
 
         try:
             with open(src_csv_path, mode='r', newline='', encoding='utf-8') as infile:
@@ -1704,7 +1722,17 @@ class TestManagerApp:
                 writer.writeheader()
                 writer.writerows(rows_to_write)
 
-            messagebox.showinfo("Export Successful", f"Successfully exported {len(rows_to_write)} student response(s) to:\n{save_path}")
+            messagebox.showinfo("Export Successful", f"Successfully exported {len(rows_to_write)} student response(s) to:\n\n{save_path}")
+
+            # Open folder in macOS Finder / Windows Explorer to reveal exported CSV
+            try:
+                if sys.platform == "darwin":
+                    subprocess.run(["open", "-R", save_path])
+                elif sys.platform == "win32":
+                    subprocess.run(f'explorer /select,"{os.path.normpath(save_path)}"', shell=True)
+            except Exception as reveal_err:
+                print(f"Could not reveal file in manager: {reveal_err}")
+
         except Exception as e:
             messagebox.showerror("Export Error", f"Failed to export CSV: {e}")
 
