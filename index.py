@@ -1619,14 +1619,24 @@ class TestManagerApp:
     # ---------- EXPORT CSV ----------
     def export_csv(self):
         if not self.current_test_data:
+            messagebox.showwarning("No Selection", "Please select a test from the left list first.")
             return
 
         output_dir = self.settings.get("output_dir")
-        csv_files = self.processor.get_csv_files(output_dir)
-        csv_files = [f for f in csv_files if os.path.basename(f) != "Option_Analysis.csv"]
+        if not output_dir or not os.path.exists(output_dir):
+            messagebox.showwarning("No Data", "Output directory does not exist. Please run OMR grading first.")
+            return
+
+        # Search both output_dir/Results and output_dir for CSV files
+        csv_files = []
+        for root_folder in [os.path.join(output_dir, "Results"), output_dir]:
+            if os.path.exists(root_folder):
+                for f in os.listdir(root_folder):
+                    if f.lower().endswith(".csv") and f.lower() != "option_analysis.csv":
+                        csv_files.append(os.path.join(root_folder, f))
 
         if not csv_files:
-            messagebox.showwarning("No CSV", "No graded CSV files found to export. Please run grading first.")
+            messagebox.showwarning("No CSV Results", "No graded CSV files found to export. Please click 'Run Command' to grade sheets first.")
             return
 
         # Use the latest CSV results file
@@ -1634,11 +1644,11 @@ class TestManagerApp:
         src_csv_path = csv_files[0]
 
         test_name = self.current_test_data.get("name", "test")
-        safe_test_name = "".join(c if c.isalnum() or c in (' ', '_', '-') else '_' for c in test_name)
-        safe_test_name = safe_test_name.replace(" ", "_")
+        safe_test_name = "".join(c if c.isalnum() or c in (' ', '_', '-') else '_' for c in test_name).replace(" ", "_")
 
         # Ask user where to save
         save_path = filedialog.asksaveasfilename(
+            parent=self.root,
             title="Export CSV",
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
@@ -1653,39 +1663,50 @@ class TestManagerApp:
                 fieldnames = reader.fieldnames or []
                 
                 # Identify and sort question columns (e.g. q1, q2... q60)
-                q_headers = [h for h in fieldnames if h.lower().startswith("q") and h[1:].isdigit()]
-                q_headers.sort(key=lambda x: int(x[1:]))
+                q_headers = [h for h in fieldnames if (h.lower().startswith("q") and h[1:].isdigit()) or h.isdigit()]
+                q_headers.sort(key=lambda x: int(x[1:]) if x.lower().startswith("q") else int(x))
 
                 out_headers = ["Roll"] + q_headers
 
                 rows_to_write = []
                 for row in reader:
-                    # Filter out answer key rows
+                    # Look for non-empty roll number
                     roll_val = ""
                     for key_name in ["Roll_no", "roll_no", "Roll", "roll"]:
-                        if key_name in row:
-                            roll_val = row[key_name].strip()
+                        val = row.get(key_name, "").strip()
+                        if val:
+                            roll_val = val
                             break
                     
                     file_id_val = row.get("file_id", "").strip()
-                    if roll_val.upper() == "KEY" or file_id_val == "Answer Key":
+                    if roll_val.upper() == "KEY" or file_id_val == "Answer Key" or file_id_val.upper() == "ANSWER KEY":
                         continue
+
+                    # If Roll Number is empty, fall back to file_id
                     if not roll_val:
-                        continue
-                    
+                        roll_val = file_id_val if file_id_val else "N/A"
+
+                    # Clean file extension if roll_val came from file_id (e.g. page_2.jpg -> page_2)
+                    if roll_val.lower().endswith((".jpg", ".png", ".jpeg")):
+                        roll_val = os.path.splitext(roll_val)[0]
+
                     new_row = {"Roll": roll_val}
                     for q in q_headers:
                         new_row[q] = row.get(q, "")
                     rows_to_write.append(new_row)
+
+            if not rows_to_write:
+                messagebox.showwarning("No Student Data", "No student rows were found in the results file.")
+                return
 
             with open(save_path, mode='w', newline='', encoding='utf-8') as outfile:
                 writer = csv.DictWriter(outfile, fieldnames=out_headers)
                 writer.writeheader()
                 writer.writerows(rows_to_write)
 
-            messagebox.showinfo("Success", f"CSV exported successfully to:\n{save_path}")
+            messagebox.showinfo("Export Successful", f"Successfully exported {len(rows_to_write)} student response(s) to:\n{save_path}")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to export CSV: {e}")
+            messagebox.showerror("Export Error", f"Failed to export CSV: {e}")
 
     # ---------- VERIFY RESULTS ----------
     def verify_results(self):
