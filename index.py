@@ -873,6 +873,9 @@ class TestManagerApp:
         self.btn_darken = Button(action_frame, text="Darken CSV", command=self.darken_csv, state=DISABLED)
         self.btn_darken.pack(side=LEFT, padx=2)
 
+        self.btn_replace = Button(action_frame, text="Replace Sheet", command=self.replace_error_sheet, state=DISABLED)
+        self.btn_replace.pack(side=LEFT, padx=2)
+
         # Output display area
         self.output_frame = LabelFrame(right_frame, text="CSV Output", padx=5, pady=5)
         self.output_frame.pack(fill=BOTH, expand=True, pady=5)
@@ -931,6 +934,7 @@ class TestManagerApp:
                 self.btn_export_csv.config(state=NORMAL)
                 self.btn_verify.config(state=NORMAL)
                 self.btn_darken.config(state=NORMAL)
+                self.btn_replace.config(state=NORMAL)
                 # Clear output display
                 self.output_text.delete(1.0, END)
                 # Check if CSV exists in output dir and display it
@@ -947,6 +951,7 @@ class TestManagerApp:
             self.btn_export_csv.config(state=DISABLED)
             self.btn_verify.config(state=DISABLED)
             self.btn_darken.config(state=DISABLED)
+            self.btn_replace.config(state=DISABLED)
 
     # ---------- CRUD DIALOGS ----------
     def add_test_dialog(self):
@@ -1475,14 +1480,13 @@ class TestManagerApp:
             info_text.insert(END, f"⚠️ NOTICE: {success} of {total} sheets graded successfully ({errors} failed).\n\n")
             info_text.insert(END, "Why did the command run successfully?\n")
             info_text.insert(END, f"• The OMR engine graded all {success} valid student sheets and saved their scores to the results table.\n")
-            info_text.insert(END, f"• The {errors} unreadable sheet(s) could not be aligned (e.g. corner markers missing or scanned upside-down) and were moved to the 'ErrorFiles' folder so they did not stop the rest of your class from being graded.\n\n")
+            info_text.insert(END, f"• The {errors} unreadable sheet(s) could not be aligned (corner markers missing or bad scan) and were moved to 'ErrorFiles' so class evaluation was not stopped.\n\n")
             info_text.insert(END, f"Unreadable / Failed Sheets ({errors}):\n")
             for fname, reason in error_details:
                 info_text.insert(END, f"  • {fname}: {reason}\n")
-            info_text.insert(END, "\n📋 How to fix & re-run unreadable sheets:\n")
-            info_text.insert(END, "  1. Click 'Darken & Re-run' below if bubbles or corner markers are faint/light.\n")
-            info_text.insert(END, "  2. Click 'Open Error Folder' to inspect the unreadable image in Finder/Explorer.\n")
-            info_text.insert(END, "  3. If rotated or upside-down, rotate the scan right-side up, save to input directory, and click 'Run Command' again.\n")
+            info_text.insert(END, "\n📋 2-STEP ERROR RECOVERY WORKFLOW:\n")
+            info_text.insert(END, "  🔹 STEP 1 (Auto Darken): Click 'Darken & Re-run' below to auto-enhance faint bubbles/markers.\n")
+            info_text.insert(END, "  🔹 STEP 2 (Replace Sheet): If darkening fails or the sheet is damaged, click 'Replace & Process Sheet' below to upload a new scan for that student sheet.\n")
 
         info_text.config(state=DISABLED)
 
@@ -1504,11 +1508,13 @@ class TestManagerApp:
             except Exception as e:
                 messagebox.showerror("Error", f"Could not open error folder: {e}")
 
-        Button(btn_frame, text="OK", command=summary_win.destroy, width=10, font=("Arial", 10, "bold")).pack(side=RIGHT, padx=10)
-        Button(btn_frame, text="Verify Sheets", command=lambda: [summary_win.destroy(), self.verify_results()], width=12).pack(side=RIGHT, padx=4)
+        Button(btn_frame, text="OK", command=summary_win.destroy, width=8, font=("Arial", 10, "bold")).pack(side=RIGHT, padx=8)
+        Button(btn_frame, text="Verify Sheets", command=lambda: [summary_win.destroy(), self.verify_results()], width=11).pack(side=RIGHT, padx=3)
         if errors > 0:
-            Button(btn_frame, text="Darken & Re-run", command=lambda: [summary_win.destroy(), self.darken_csv()], width=14, bg="#1d4ed8", fg="white").pack(side=RIGHT, padx=4)
-            Button(btn_frame, text="Open Error Folder", command=open_error_folder, width=15).pack(side=RIGHT, padx=4)
+            first_err_file = error_details[0][0] if error_details else None
+            Button(btn_frame, text="Replace & Process Sheet", command=lambda: [summary_win.destroy(), self.replace_error_sheet(first_err_file)], width=18, bg="#047857", fg="white", font=("Arial", 10, "bold")).pack(side=RIGHT, padx=3)
+            Button(btn_frame, text="Darken & Re-run", command=lambda: [summary_win.destroy(), self.darken_csv()], width=13, bg="#1d4ed8", fg="white").pack(side=RIGHT, padx=3)
+            Button(btn_frame, text="Open Error Folder", command=open_error_folder, width=14).pack(side=RIGHT, padx=3)
 
     # ---------- DISPLAY CSV ----------
     def display_latest_csv(self):
@@ -1865,6 +1871,117 @@ class TestManagerApp:
                 self.root.after(0, reenable)
 
         threading.Thread(target=process, daemon=True).start()
+
+    # ---------- REPLACE ERROR SHEET ----------
+    def replace_error_sheet(self, target_fname=None):
+        if not self.current_test_id:
+            messagebox.showwarning("Warning", "Please select a test first.")
+            return
+
+        input_dir = self.settings.get("input_dir")
+        output_dir = self.settings.get("output_dir")
+
+        if not os.path.exists(input_dir):
+            messagebox.showerror("Error", f"Input directory '{input_dir}' does not exist.")
+            return
+
+        # Find error files if target_fname is not specified
+        error_csv = os.path.join(output_dir, "Manual", "ErrorFiles.csv")
+        error_files = []
+        if os.path.exists(error_csv):
+            try:
+                with open(error_csv, mode='r', newline='', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        fid = row.get("file_id", "").strip()
+                        if fid and fid != "file_id":
+                            error_files.append(fid)
+            except Exception:
+                pass
+
+        if not target_fname:
+            if not error_files:
+                exts = (".png", ".jpg", ".jpeg")
+                all_imgs = [f for f in os.listdir(input_dir) if f.lower().endswith(exts) and not f.lower().startswith("omr_marker")]
+                if not all_imgs:
+                    messagebox.showwarning("No Sheets", "No student sheets found in input directory.")
+                    return
+
+                select_win = Toplevel(self.root)
+                select_win.title("Select Sheet to Replace")
+                select_win.geometry("420x200")
+                select_win.transient(self.root)
+                select_win.grab_set()
+
+                Label(select_win, text="Select the student sheet page you want to replace:", font=("Arial", 11, "bold")).pack(pady=(15, 5))
+                combo_var = StringVar(value=all_imgs[0])
+                combo = ttk.Combobox(select_win, textvariable=combo_var, values=all_imgs, state="readonly", font=("Arial", 11), width=30)
+                combo.pack(pady=10)
+
+                def on_confirm_select():
+                    chosen = combo_var.get()
+                    select_win.destroy()
+                    self.replace_error_sheet(target_fname=chosen)
+
+                Button(select_win, text="Continue to Upload Replacement File", command=on_confirm_select, bg="#1d4ed8", fg="white", font=("Arial", 10, "bold"), pady=4).pack(pady=15)
+                return
+            elif len(error_files) == 1:
+                target_fname = error_files[0]
+            else:
+                select_win = Toplevel(self.root)
+                select_win.title("Select Error Sheet to Replace")
+                select_win.geometry("450x220")
+                select_win.transient(self.root)
+                select_win.grab_set()
+
+                Label(select_win, text="Multiple unreadable error sheets found.", font=("Arial", 11, "bold")).pack(pady=(15, 2))
+                Label(select_win, text="Select which failed student sheet image to replace:", font=("Arial", 10)).pack(pady=(0, 10))
+
+                combo_var = StringVar(value=error_files[0])
+                combo = ttk.Combobox(select_win, textvariable=combo_var, values=error_files, state="readonly", font=("Arial", 11), width=32)
+                combo.pack(pady=5)
+
+                def on_confirm_select():
+                    chosen = combo_var.get()
+                    select_win.destroy()
+                    self.replace_error_sheet(target_fname=chosen)
+
+                Button(select_win, text="Continue & Upload New Image", command=on_confirm_select, bg="#1d4ed8", fg="white", font=("Arial", 10, "bold"), pady=4).pack(pady=15)
+                return
+
+        # Prompt user to select replacement image or PDF file
+        filetypes = [("Image or PDF Files", "*.png *.jpg *.jpeg *.pdf"), ("All Files", "*.*")]
+        selected_file = filedialog.askopenfilename(
+            title=f"Select Replacement Image for Sheet '{target_fname}'",
+            filetypes=filetypes
+        )
+        if not selected_file:
+            return
+
+        dest_path = os.path.join(input_dir, target_fname)
+
+        try:
+            ext = os.path.splitext(selected_file)[1].lower()
+            if ext == ".pdf":
+                doc = fitz.open(selected_file)
+                if len(doc) > 0:
+                    page = doc.load_page(0)
+                    pix = page.get_pixmap(dpi=150)
+                    pix.save(dest_path)
+                doc.close()
+            else:
+                shutil.copy2(selected_file, dest_path)
+
+            messagebox.showinfo(
+                "Sheet Replaced",
+                f"Successfully replaced '{target_fname}' with new image scan.\n\nClick OK to re-run OMR evaluation on the updated sheet."
+            )
+
+            # Auto-trigger run_command to evaluate the replaced sheet
+            self.run_command()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to replace sheet image: {e}")
 
     # ---------- EXPORT CSV ----------
     def export_csv(self):
