@@ -302,6 +302,7 @@ class ImageInstanceOps:
 
                     # TODO: get rid of total_q_box_no
                     detected_bubbles = []
+                    strip_start_box_no = total_q_box_no
                     for bubble in field_block_bubbles:
                         bubble_is_marked = (
                             per_q_strip_threshold > all_q_vals[total_q_box_no]
@@ -345,6 +346,47 @@ class ImageInstanceOps:
                                 CLR_GRAY,
                                 -1,
                             )
+
+                    # Fallback for faint bubbles in single-selection digit/integer columns (e.g. roll numbers)
+                    if len(detected_bubbles) == 0 and len(field_block_bubbles) > 2:
+                        is_digit_col = (
+                            getattr(field_block, "field_type", "") in ["QTYPE_INT", "QTYPE_INT_FROM_1"]
+                            or field_block.name.startswith("r")
+                            or field_block.name.startswith("roll")
+                            or all(str(b.field_value).isdigit() for b in field_block_bubbles)
+                        )
+                        if is_digit_col:
+                            strip_vals = all_q_vals[strip_start_box_no:total_q_box_no]
+                            min_val = min(strip_vals)
+                            min_idx = strip_vals.index(min_val)
+                            avg_others = (sum(strip_vals) - min_val) / (len(strip_vals) - 1)
+                            if avg_others - min_val >= 7.5:
+                                fallback_bubble = field_block_bubbles[min_idx]
+                                detected_bubbles.append(fallback_bubble)
+                                x, y, field_value = (
+                                    fallback_bubble.x + field_block.shift,
+                                    fallback_bubble.y,
+                                    fallback_bubble.field_value,
+                                )
+                                cv2.rectangle(
+                                    final_marked,
+                                    (int(x + box_w / 12), int(y + box_h / 12)),
+                                    (
+                                        int(x + box_w - box_w / 12),
+                                        int(y + box_h - box_h / 12),
+                                    ),
+                                    CLR_DARK_GRAY,
+                                    3,
+                                )
+                                cv2.putText(
+                                    final_marked,
+                                    str(field_value),
+                                    (x, y),
+                                    cv2.FONT_HERSHEY_SIMPLEX,
+                                    TEXT_SIZE,
+                                    (20, 20, 10),
+                                    int(1 + 3.5 * TEXT_SIZE),
+                                )
 
                     for bubble in detected_bubbles:
                         field_label, field_value = (

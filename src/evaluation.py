@@ -396,16 +396,22 @@ class EvaluationConfig:
 
     @staticmethod
     def parse_answer_column(answer_column):
-        if answer_column[0] == "[":
+        if answer_column is None or pd.isna(answer_column):
+            return ""
+        answer_str = str(answer_column).strip()
+        if not answer_str:
+            return ""
+        if answer_str[0] == "[":
             # multiple-correct-weighted or multiple-correct
-            parsed_answer = ast.literal_eval(answer_column)
-        elif "," in answer_column:
+            parsed_answer = ast.literal_eval(answer_str)
+        elif "," in answer_str:
             # multiple-correct
-            parsed_answer = answer_column.split(",")
+            parsed_answer = answer_str.split(",")
         else:
             # single-correct
-            parsed_answer = answer_column
+            parsed_answer = answer_str
         return parsed_answer
+
 
     def parse_questions_in_order(self, questions_in_order):
         return parse_fields("questions_in_order", questions_in_order)

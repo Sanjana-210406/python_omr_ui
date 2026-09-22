@@ -30,6 +30,85 @@ else:
 PIN_SALT = "some_salt"  # Keep fixed for hashing
 
 
+# ========================== ROLL NUMBER EXTRACTION ==========================
+def extract_roll_number(row):
+    """
+    Robustly extract student roll number from a CSV row dictionary.
+    Handles:
+    1. Special KEY detection for Answer Key rows.
+    2. Standard column names (Roll_no, Roll, roll_no, Roll No, Roll_No, rollNo, rollNumber, student_id, etc.).
+    3. Case-insensitive key search for any column name containing 'roll' or 'student'.
+    4. Concatenating individual digit columns (r1..r4, roll1..roll4) if no combined column exists.
+    5. Stripping trailing .0 from numeric float representations.
+    6. Fallback to cleaned file_id (removing image extensions like .jpg, .png).
+    """
+    if not isinstance(row, dict):
+        return ""
+
+    # Clean keys and values
+    clean_row = {}
+    for k, v in row.items():
+        if k is not None:
+            val_str = str(v).strip() if v is not None else ""
+            if val_str.endswith(".0") and val_str[:-2].isdigit():
+                val_str = val_str[:-2]
+            clean_row[k.strip()] = val_str
+
+    invalid_vals = {"", "N/A", "NONE", "NAN", "NULL", "~"}
+
+    # 1. Check for Answer Key row
+    file_id_val = clean_row.get("file_id", "").strip()
+    roll_no_val = clean_row.get("Roll_no", "").strip()
+    if roll_no_val.upper() == "KEY" or file_id_val.lower() in ["answer key", "answer_key.jpg", "page_1.jpg", "key"]:
+        return "KEY"
+
+    # 2. Check common roll number key names
+    common_keys = [
+        "Roll_no", "roll_no", "Roll", "roll", "Roll_No", "Roll No", "rollNo",
+        "rollNumber", "roll_number", "student_id", "Student_ID", "student_no",
+        "Student_No", "RollNo", "Roll_Num", "roll_num"
+    ]
+    for k in common_keys:
+        if k in clean_row:
+            v = clean_row[k]
+            if v and v.upper() not in invalid_vals and v.upper() != "KEY":
+                return v
+
+    # 3. Flexible search for keys containing 'roll' or 'student'
+    excluded_keys = {
+        "file_id", "input_path", "output_path", "total_students", "total students",
+        "percent_correct", "correct_count", "incorrect_count", "unmarked_count", "score", "total"
+    }
+    for k, v in clean_row.items():
+        k_lower = k.lower().replace(" ", "_").replace("-", "_")
+        if ("roll" in k_lower or "student" in k_lower) and k_lower not in excluded_keys:
+            if v and v.upper() not in invalid_vals and v.upper() != "KEY":
+                return v
+
+    # 4. Check for unconcatenated digit columns (r1, r2, r3... or roll1, roll2...)
+    r_keys = [
+        k for k in clean_row.keys()
+        if (k.lower().startswith("r") and k[1:].isdigit()) or (k.lower().startswith("roll") and k[4:].isdigit())
+    ]
+    if r_keys:
+        def r_key_sort(x):
+            digits = "".join(c for c in x if c.isdigit())
+            return int(digits) if digits else 0
+        r_keys.sort(key=r_key_sort)
+        concat_val = "".join(clean_row[k] for k in r_keys if clean_row[k].upper() not in invalid_vals)
+        if concat_val:
+            return concat_val
+
+    # 5. Fallback to file_id
+    if file_id_val and file_id_val.upper() not in ["ANSWER KEY", "KEY"]:
+        cleaned = os.path.splitext(file_id_val)[0]
+        return cleaned
+
+    return ""
+
+
+
+
 # ========================== DATABASE ==========================
 class Database:
     def __init__(self, db_file=DB_FILE):
@@ -677,16 +756,17 @@ class PDFProcessor:
     # CSV Files
     # -------------------------------------------------------
     def get_csv_files(self, output_dir):
-
         results_dir = os.path.join(output_dir, "Results")
-
         if not os.path.exists(results_dir):
             return []
 
+        exclude_names = ("option_analysis.csv", "errorfiles.csv", "multimarkedfiles.csv", "answer_key.csv")
         return [
             os.path.join(results_dir, f)
             for f in os.listdir(results_dir)
             if f.lower().endswith(".csv")
+            and f.lower() not in exclude_names
+            and not f.lower().startswith("student_responses_")
         ]
 
     # -------------------------------------------------------
@@ -1720,7 +1800,7 @@ class TestManagerApp:
                 # Filter out key rows
                 student_rows = []
                 for row in rows:
-                    roll = str(row.get("Roll_no", "")).strip()
+                    roll = extract_roll_number(row)
                     file_id = str(row.get("file_id", "")).strip()
                     if roll.upper() == "KEY" or "key" in file_id.lower():
                         continue
@@ -1734,7 +1814,7 @@ class TestManagerApp:
                 # Fetch student data for all students first
                 self.root.after(0, lambda: self.status_var.set("Fetching student data from Firestore..."))
                 for idx, row in enumerate(student_rows, start=1):
-                    roll = str(row.get("Roll_no", "")).strip()
+                    roll = extract_roll_number(row)
                     score = row.get("score", "N/A")
                     
                     self.root.after(0, lambda r=roll, i=idx: self.status_var.set(f"Querying student ({i}/{processed_count}): Roll No {r}"))
@@ -1994,13 +2074,21 @@ class TestManagerApp:
             messagebox.showwarning("No Data", "Output directory does not exist. Please run OMR grading first.")
             return
 
-        # Search both output_dir/Results and output_dir for CSV files
-        csv_files = []
-        for root_folder in [os.path.join(output_dir, "Results"), output_dir]:
-            if os.path.exists(root_folder):
-                for f in os.listdir(root_folder):
-                    if f.lower().endswith(".csv") and f.lower() != "option_analysis.csv":
-                        csv_files.append(os.path.join(root_folder, f))
+        # Search output_dir/Results first using get_csv_files
+        csv_files = self.processor.get_csv_files(output_dir)
+        exclude_names = ("option_analysis.csv", "errorfiles.csv", "multimarkedfiles.csv", "answer_key.csv")
+        csv_files = [
+            f for f in csv_files
+            if os.path.basename(f).lower() not in exclude_names and not os.path.basename(f).lower().startswith("student_responses_")
+        ]
+
+        if not csv_files:
+            # Fallback search directly in output_dir
+            if os.path.exists(output_dir):
+                for f in os.listdir(output_dir):
+                    f_lower = f.lower()
+                    if f_lower.endswith(".csv") and f_lower not in exclude_names and not f_lower.startswith("student_responses_"):
+                        csv_files.append(os.path.join(output_dir, f))
 
         if not csv_files:
             messagebox.showwarning("No CSV Results", "No graded CSV files found to export. Please click 'Run Command' to grade sheets first.")
@@ -2054,31 +2142,55 @@ class TestManagerApp:
                 out_headers = ["Roll"] + q_headers
 
                 rows_to_write = []
+                key_row = None
+                student_rows = []
+
                 for row in reader:
-                    # Look for non-empty roll number
-                    roll_val = ""
-                    for key_name in ["Roll_no", "roll_no", "Roll", "roll"]:
-                        val = row.get(key_name, "").strip()
-                        if val:
-                            roll_val = val
-                            break
-                    
                     file_id_val = row.get("file_id", "").strip()
-                    if roll_val.upper() == "KEY" or file_id_val == "Answer Key" or file_id_val.upper() == "ANSWER KEY":
+                    roll_val = extract_roll_number(row)
+
+                    if roll_val.upper() == "KEY" or file_id_val in ["Answer Key", "answer_key.jpg"] or file_id_val.upper() == "ANSWER KEY":
+                        if not key_row:
+                            k_row = {"Roll": "KEY"}
+                            for q in q_headers:
+                                k_row[q] = row.get(q, "")
+                            key_row = k_row
                         continue
 
-                    # If Roll Number is empty, fall back to file_id
                     if not roll_val:
                         roll_val = file_id_val if file_id_val else "N/A"
 
-                    # Clean file extension if roll_val came from file_id (e.g. page_2.jpg -> page_2)
+                    # Clean file extension if roll_val came from file_id
                     if roll_val.lower().endswith((".jpg", ".png", ".jpeg")):
                         roll_val = os.path.splitext(roll_val)[0]
 
                     new_row = {"Roll": roll_val}
                     for q in q_headers:
                         new_row[q] = row.get(q, "")
-                    rows_to_write.append(new_row)
+                    student_rows.append(new_row)
+
+                if not key_row:
+                    input_dir = self.get_current_input_dir()
+                    if input_dir:
+                        key_csv_path = os.path.join(input_dir, "answer_key.csv")
+                        if os.path.exists(key_csv_path):
+                            try:
+                                k_row = {"Roll": "KEY"}
+                                with open(key_csv_path, mode="r", encoding="utf-8") as kf:
+                                    for line in kf:
+                                        parts = line.strip().split(",")
+                                        if len(parts) >= 2:
+                                            q_k, q_v = parts[0].strip(), parts[1].strip()
+                                            if q_k in q_headers:
+                                                k_row[q_k] = q_v
+                                key_row = k_row
+                            except Exception as ke:
+                                print(f"Could not load answer_key.csv fallback: {ke}")
+
+                if key_row:
+                    rows_to_write.append(key_row)
+                rows_to_write.extend(student_rows)
+
 
             if not rows_to_write:
                 messagebox.showwarning("No Student Data", "No student rows were found in the results file.")
@@ -2137,11 +2249,7 @@ class TestManagerApp:
         answer_key = {}
         q_headers = []
         for row in csv_rows:
-            roll_val = ""
-            for key_name in ["Roll_no", "roll_no", "Roll", "roll"]:
-                if key_name in row:
-                    roll_val = row[key_name].strip()
-                    break
+            roll_val = extract_roll_number(row)
             file_id_val = row.get("file_id", "").strip()
             if roll_val.upper() == "KEY" or file_id_val == "Answer Key":
                 answer_key = row
@@ -2206,11 +2314,7 @@ class TestManagerApp:
         dropdown_options = []
         for idx, img_name in enumerate(images):
             row = csv_data.get(img_name, {})
-            roll = ""
-            for k in ["Roll_no", "roll_no", "Roll", "roll"]:
-                if k in row:
-                    roll = row[k].strip()
-                    break
+            roll = extract_roll_number(row)
             if roll:
                 label_text = f"Roll {roll} ({img_name})"
             else:
@@ -2323,11 +2427,7 @@ class TestManagerApp:
                 tree.delete(item)
 
             if student_row:
-                roll_val = ""
-                for k in ["Roll_no", "roll_no", "Roll", "roll"]:
-                    if k in student_row:
-                        roll_val = student_row[k].strip()
-                        break
+                roll_val = extract_roll_number(student_row)
                 score_val = student_row.get("score", "N/A").strip()
                 
                 roll_header.config(text=f"Roll Number: {roll_val}")

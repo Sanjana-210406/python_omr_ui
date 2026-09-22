@@ -85,9 +85,10 @@ def parse_fields(key, fields):
 
 def parse_field_string(field_string):
     if "." in field_string:
-        field_prefix, start, end = re.findall(FIELD_STRING_REGEX_GROUPS, field_string)[
-            0
-        ]
+        matches = re.findall(FIELD_STRING_REGEX_GROUPS, field_string)
+        if not matches:
+            return [field_string]
+        field_prefix, start, end = matches[0]
         start, end = int(start), int(end)
         if start >= end:
             raise Exception(
@@ -101,7 +102,10 @@ def parse_field_string(field_string):
 
 
 def custom_sort_output_columns(field_label):
-    label_prefix, label_suffix = re.findall(FIELD_LABEL_NUMBER_REGEX, field_label)[0]
+    matches = re.findall(FIELD_LABEL_NUMBER_REGEX, field_label)
+    if not matches:
+        return [field_label, 0]
+    label_prefix, label_suffix = matches[0]
     return [label_prefix, int(label_suffix) if len(label_suffix) > 0 else 0]
 
 
